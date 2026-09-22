@@ -1,13 +1,11 @@
-# Collaboration entry point
+# Repository review instructions
 
-Read [collaboration/AGENTS.md](collaboration/AGENTS.md) before development,
-and use [collaboration/README.md](collaboration/README.md) as our working index.
 Existing project contracts in `CONTRIBUTING.md`, `docs/` and source rustdoc still
-apply. Keep our plans, investigations and templates in `collaboration/`.
+apply. Keep changes focused and preserve unrelated work.
 
 ## Code Review Rules
 
-Follow [collaboration/review.md](collaboration/review.md) for a formal PR review.
+Follow [.github/CODEX_REVIEW.md](.github/CODEX_REVIEW.md) for a formal PR review.
 
 - Flag VR changes that silently alter fields, filtration ordering, multiplicity,
   computed dimensions or cutoff/coverage semantics. A speedup must preserve the

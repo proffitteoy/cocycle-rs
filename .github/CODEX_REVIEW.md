@@ -1,13 +1,17 @@
 # Codex GitHub review
 
-[Collaboration workspace](README.md) / [Submission workflow](workflow.md)
+[Repository review instructions](../AGENTS.md)
 
 This is the repository-specific review playbook and prompt template. Root
 `AGENTS.md` contains the applicable `Code Review Rules`; its explicit link here
 keeps detailed instructions centralized without relying on a nested file to
 govern unrelated `src/` paths.
 
-## Cloud prerequisite and current verification boundary
+This playbook is fork-local review configuration for `proffitteoy/cocycle-rs`.
+It does not require local planning files or a machine-specific checkout.
+The existing project contribution and mathematical contracts remain authoritative.
+
+## Cloud prerequisite
 
 Official OpenAI documentation was checked on 2026-09-22:
 
@@ -20,10 +24,9 @@ Select `proffitteoy/cocycle-rs`. Automatic reviews are optional; the desired
 workflow here is a user-requested review on a PR.
 
 Repository instructions and templates do not enable that account/repository
-setting. During initialization the browser connection was unavailable, so its
-current state could not be inspected or changed. Do not mark the integration
-active until the repository setting and an actual review response are observed.
-No extra GitHub Action, API-key secret or scheduled review is installed here.
+setting. Verify the setting and an actual review response before reporting the
+integration as active. No extra GitHub Action, API-key secret or scheduled review
+is required by this playbook.
 
 ## Request template
 
@@ -32,12 +35,12 @@ Post this as a **PR comment**, after replacing the focus and evidence fields:
 ```text
 @codex review
 
-Follow root AGENTS.md and collaboration/review.md. Review the current PR diff
+Follow root AGENTS.md and .github/CODEX_REVIEW.md. Review the current PR diff
 against its actual base, read-only; do not edit, commit, push or merge.
 
-Focus: <VR / diagram distance / shared contracts / collaboration tooling>.
+Focus: <VR / diagram distance / shared contracts / review configuration>.
 Check the mathematical contracts and the applicable reference matrix in
-collaboration/validation.md. Separate demonstrated defects from missing evidence
+.github/CODEX_REVIEW.md. Separate demonstrated defects from missing evidence
 and existing issues. Give precise changed-file/line evidence for each finding.
 
 Evidence: <actual CI run/artifact links, or explicitly unavailable>.
@@ -55,12 +58,32 @@ rules guide the service; they are not tests, branch protection or merge approval
 The structure below guides evidence and manual records, not a guarantee that
 the hosted service emits an identical Markdown layout.
 
+## Required evidence
+
+Use [CONTRIBUTING.md](../CONTRIBUTING.md) and the
+[mathematical specification](../docs/reference/mathematics.md) for existing
+contracts and maintained commands. New distance capabilities must supply their
+own runnable comparison harness rather than imply one already exists.
+
+| Changed contract | Independent expectation and external comparisons |
+| --- | --- |
+| Exact VR construction/persistence | Hand calculation, property or independent reducer; GUDHI and Ripser on shared supported cases |
+| Sparse Rips approximation | Independent sampling/blocker checks and GUDHI sparse construction; Ripser cannot validate higher-simplex blockers, so retain separate exact-Rips regressions |
+| Diagram distances | Hand calculations and tiny exhaustive matching independent of production; GUDHI and Topp with aligned order/norm and essential-point semantics |
+| Shared diagram/context conversion | Apply both VR and distance checks when both contracts are affected |
+| Documentation/templates only | Source and local-link checks; no invented algorithm or performance evidence |
+
+Record reference revisions, precision, field, dimensions, cutoff/coverage,
+multiplicity, tolerance justification and explicit unsupported cases. Compare
+equivalent work for performance and retain regressions. Missing comparisons are
+evidence gaps, not proof of a bug; unsupported cases need independent validation.
+
 ## Review procedure
 
 1. Establish repository, base/head SHA and diff. Read root instructions, this
    playbook, the affected project contracts and relevant call sites/tests.
    For local review, inspect dirty state separately from the committed PR diff.
-2. Classify the change using [validation](validation.md). Follow affected data
+2. Classify the change using the evidence matrix above. Follow affected data
    from input/construction through reduction/results and distance consumers.
 3. Check concrete correctness/compatibility risks below. Only report a defect
    when a triggering case and consequence are supported by code or evidence.
@@ -124,7 +147,7 @@ Evidence: <code reasoning, minimal reproducer, or an actual result>
 Suggested correction: <smallest required invariant/behavior change>
 ```
 
-For a human-maintained review record in this directory, use:
+For a human-maintained review record, use:
 
 ```text
 Reviewed repository / PR:

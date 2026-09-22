@@ -1,10 +1,10 @@
 <!-- Optional collaboration template. Keep the existing default template intact. -->
 <!-- Target proffitteoy/cocycle-rs:main from a feature branch. -->
-<!-- Follow collaboration/workflow.md and collaboration/validation.md. -->
+<!-- Follow CONTRIBUTING.md and .github/CODEX_REVIEW.md. -->
 
 ## Problem and resulting behavior
 
-Describe the concrete problem, resulting behavior and phase-one scope.
+Describe the concrete problem, resulting behavior and scope.
 State any mathematical/public API change and intentional exclusions.
 
 ## Validation
@@ -29,10 +29,11 @@ Machine-local artifacts alone are unavailable to a cloud reviewer.
 
 State endpoint, approximation, ownership, dependency/MSRV and API implications.
 List remaining risks or verification gaps. Identify any necessary edits to
-shared product documentation; keep our planning/reporting in collaboration/.
+shared product documentation. Keep local planning and machine configuration out
+of the PR; attach reproducible evidence or accessible artifacts instead.
 
 ## Review and handoff
 
-Use the review prompt in collaboration/review.md when requesting review.
+Use the review prompt in .github/CODEX_REVIEW.md when requesting review.
 Record the reviewed head and follow-up resolution. Merging and onward transfer
 remain with the user; this PR does not request an upstream submission or release.
