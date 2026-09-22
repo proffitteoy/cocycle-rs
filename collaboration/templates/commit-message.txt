@@ -1,0 +1,17 @@
+type(scope): concise imperative summary
+
+Problem and change:
+- Describe the concrete trigger/problem and resulting behavior.
+
+Validation:
+- List checks actually run and their outcomes; state unrun checks with reasons.
+- For algorithms: identify GUDHI plus Ripser (VR) or Topp (distance), revisions,
+  evidence location and explicit exclusions. Use N/A for documentation only.
+
+Risks and limits:
+- State compatibility changes, remaining evidence gaps, or none for this scope.
+
+# Replace placeholders; keep this proportional to the change.
+# Types: feat, fix, perf, test, docs, chore.
+# Scopes: vr, distance, oracle, collaboration, ci, or a precise existing owner.
+# Do not claim pending CI, oracle results or performance as verified.
