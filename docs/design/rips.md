@@ -2,14 +2,19 @@
 
 [Documentation](../README.md) / Design
 
+The [API design](rips-api.md) supersedes this document's original entry-point
+sketches. It defines named explicit-complex construction and direct-persistence
+workflows; simplex inspection requires expansion. These workflows are implemented
+with legacy compatibility. Current usage remains in the guides and rustdoc.
+
 Status: subsystem target recorded 2026-09-20, with exact dense/sparse and
 explicit dimension-generic prime-field paths and requested representative bases
 implemented. Sparse approximation also has blocker-aware construction and computation. The
 [current architecture](../development/architecture.md), [usage guide](../guides/rips.md)
 and [construction guide](../guides/rips-construction.md) remain authoritative for
 supported behavior. The API sketches below describe the complete target and are
-not all callable today. This document owns the Rips target,
-API draft, dependency boundaries, and acceptance gates; the [roadmap](roadmap.md)
+not all callable today. This document owns the Rips target, historical API
+sketches, dependency boundaries, and acceptance gates; the [roadmap](roadmap.md)
 owns project priorities.
 
 The [implementation scope](rips-implementation.md) lists stage-specific directory

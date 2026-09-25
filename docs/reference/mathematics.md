@@ -318,18 +318,49 @@ H0 pairings and H1 clearing must use the same total order. An apparent pair
 $(\sigma,\tau)$ requires sigma to be tau's latest facet and tau to be sigma's
 earliest cofacet. Omitting its public interval also requires equal filtration
 values. Do not indiscriminately remove columns that eventually reduce to zero.
+The kernel omits stored zero-lifetime apparent pairs and reconstructs them when
+later columns need their pivots. Other shortcut pairs retain their pivot owners
+and transformation columns.
 
-The implemented emergent shortcut is restricted to original edge columns, before
-any column addition. Cofacets are enumerated by descending ID, and their values
-are at least the edge value. The first equal-valued triangle is therefore the
-original column's earliest cofacet. If its pivot is unowned, ordinary reduction
-would accept it immediately; retain $V_j=e_j$ without generating remaining rows.
-If owned, fall back to full reduction, not the next equal-valued triangle.
-Apparent-only mode additionally checks the latest-facet condition.
+Initialize the column and inspect shortcut candidates in one traversal, before
+any column addition. Cofacets are enumerated by descending ID,
+and their values are at least the edge value. The first equal-valued triangle is
+therefore the original column's earliest cofacet. Retain preceding cofacets in a
+temporary buffer. If no shortcut applies, continue the same traversal and
+build the working heap from the complete buffer; do not enumerate the prefix or
+an empty column again. Reuse the buffer only after its previous contents have
+been consumed or discarded.
 
-Zero-lifetime pairs are absent from public output but retain pivot/transform
-entries for later elimination. Mid-reduction emergent shortcuts and omission of
-apparent-pair pivot entries are not implemented. Test each optimization separately.
+An emergent shortcut accepts this first equal-valued pivot only when it has no
+stored or virtual owner. Ordinary reduction would accept it immediately; retain
+$V_j=e_j$ without generating remaining rows. If owned, fall back to ordinary
+reduction, not the next equal-valued triangle. Apparent-only mode additionally
+checks the latest-facet condition. Mid-reduction emergent shortcuts are not used.
+
+For a zero-lifetime apparent pair $(\sigma,\tau)$, the same initial traversal
+certifies both conditions: tau is sigma's first equal-valued cofacet, and sigma
+is tau's latest facet. Skip this pair without storing its pivot owner or
+transformation column. It remains a virtual column $V_\sigma=e_\sigma$;
+omitting its storage does not remove its role in later elimination.
+
+When a working pivot has no stored owner, test for that virtual pair on demand:
+take the triangle's latest facet sigma, require equal filtration values, and
+check that the triangle is sigma's earliest equal-valued cofacet. Only an edge
+preceding the active column in reverse computation order may serve as its
+virtual owner. Add $Ce_\sigma$ to cancel the pivot and include sigma in the
+active transformation, with F2 parity as for an ordinary stored owner. This
+preserves $R=CV$ and triangularity; every elimination strictly lowers the pivot.
+A triangle that fails these conditions cannot be treated as a virtual owner.
+
+Zero-lifetime H1 pairs are omitted before raw interval storage; the shared result
+assembler still removes zero-lifetime H0 pairs. Union-find, clearing, and the
+stored or virtual reduction state still account for those pairs. In particular,
+zero-lifetime emergent pairs that are
+not apparent retain their pivot/transform entries. Positive-lifetime, essential,
+and right-censored intervals retain their multiplicities. Test ordinary,
+apparent, emergent, and combined configurations against the independent oracle.
+Independent two-pass tests also check storage omission independently of
+single-pass caching, including the invariant $R=CV$ on dense and sparse inputs.
 
 ### Cone stopping bound
 

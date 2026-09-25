@@ -1,24 +1,7 @@
 //! Owned mathematical context without borrowed inputs or reducer state.
 use super::PersistenceDiagram;
 
-/// Mathematical source of a computed ordinary persistence diagram.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FiltrationKind {
-    /// Exact Rips of supplied symmetric dissimilarities (not necessarily a metric).
-    RipsDissimilarities,
-    /// Exact Rips of computed Euclidean distances.
-    RipsEuclidean,
-    /// Exact Rips of sampled custom symmetric dissimilarities.
-    RipsCustom,
-    /// Clique filtration of a supplied graph; absent edges never enter.
-    SuppliedFlag,
-    /// Sparse Rips of dissimilarities, with owned hypothesis and mapping metadata.
-    SparseRipsDissimilarities,
-    /// Sparse Rips of computed Euclidean distances.
-    SparseRipsEuclidean,
-    /// Sparse Rips of sampled custom symmetric distances.
-    SparseRipsCustom,
-}
+use crate::filtration::FiltrationKind;
 
 /// Owned context interpreting an ordinary persistence computation.
 ///

@@ -1,8 +1,9 @@
 """Profile private H1 optimization stages in separate release test processes.
 
-Only standard-library Python is needed. Inputs are distance/H1 binary fixtures
-from benchmark_gudhi.py. Test instrumentation is enabled, so these timings are
-diagnostic and must not replace the public-API cross-library benchmark.
+Only standard-library Python is needed. Inputs are COCYCLE1 distance/H1 binary
+fixtures. Two-pass initialization and virtual pairs can be measured separately
+or together. Test instrumentation is enabled, so these timings are diagnostic
+and must not replace the public-API cross-library benchmark.
 """
 
 import argparse
@@ -47,7 +48,8 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     # Failures leave a partial diagnostic record; completion is explicit.
     for fixture in args.fixtures:
-        for stage in ["explicit", "clearing", "implicit", "cone", "apparent", "emergent"]:
+        for stage in ["explicit", "clearing", "implicit", "cone", "apparent",
+                      "two-pass", "emergent", "virtual-two-pass", "virtual"]:
             print(f"{fixture.stem}: {stage}", flush=True)
             env = dict(os.environ, COCYCLE_ABLATION_FIXTURE=str(fixture.resolve()),
                        COCYCLE_ABLATION_STAGE=stage)

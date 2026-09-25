@@ -19,12 +19,14 @@
 //! ```
 //! use cocycle::descriptors::betti_curve;
 //! use cocycle::geometry::PointCloudView;
-//! use cocycle::persistence::{RipsOptions, rips_from_points};
+//! use cocycle::filtration::RipsBuilder;
+//! use cocycle::persistence::PersistenceExt;
 //!
 //! let coordinates = [0., 0., 1., 0., 1., 1., 0., 1.];
 //! let points = PointCloudView::new(&coordinates, 4, 2)?;
-//! let diagram = rips_from_points(points, &RipsOptions::default())?;
-//! assert_eq!(betti_curve(&diagram, 1, &[0., 1., 2.])?, [0, 1, 0]);
+//! let result = RipsBuilder::from_points(points).persistence().compute()?;
+//! let diagram = result.diagram();
+//! assert_eq!(betti_curve(diagram, 1, &[0., 1., 2.])?, [0, 1, 0]);
 //! # Ok::<(), cocycle::Error>(())
 //! ```
 
@@ -33,6 +35,7 @@ pub mod complex;
 pub mod descriptors;
 pub mod diagram;
 mod error;
+pub mod execution;
 pub mod filtration;
 pub mod geometry;
 pub mod persistence;

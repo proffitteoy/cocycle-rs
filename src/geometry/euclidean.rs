@@ -6,6 +6,13 @@ use crate::{Error, Result, canonical_zero};
 
 /// Stable Euclidean norms in the same condensed order used by DissimilarityView.
 pub(crate) fn euclidean_distances(input: PointCloudView<'_>) -> Result<Vec<f64>> {
+    euclidean_distances_with(input, &mut || Ok(()))
+}
+
+pub(crate) fn euclidean_distances_with(
+    input: PointCloudView<'_>,
+    checkpoint: &mut impl FnMut() -> Result<()>,
+) -> Result<Vec<f64>> {
     let count = pair_count(input.len()).ok_or(Error::SizeOverflow {
         operation: "point count choose 2",
     })?;
@@ -17,6 +24,7 @@ pub(crate) fn euclidean_distances(input: PointCloudView<'_>) -> Result<Vec<f64>>
         })?;
     for i in 0..input.len() {
         for j in 0..i {
+            checkpoint()?;
             values.push(euclidean_distance(input, i, j)?);
         }
     }

@@ -8,14 +8,14 @@
 mod interval;
 mod persistence_diagram;
 
+pub use crate::filtration::{Coverage, FiltrationKind};
 pub use interval::{IntervalEnd, PersistenceInterval};
-pub use persistence_diagram::{Coverage, PersistenceDiagram};
+pub use persistence_diagram::PersistenceDiagram;
 
-mod approximation;
-pub use approximation::{ApproximationTarget, RipsApproximation, RipsApproximationBound};
+pub use crate::filtration::{ApproximationTarget, RipsApproximation, RipsApproximationBound};
 
 mod computation;
-pub use computation::{ComputationContext, FiltrationKind, PersistenceResult};
+pub use computation::{ComputationContext, PersistenceResult};
 
 mod representative;
 pub use representative::{Representative, RepresentativeKind, RepresentativeTerm};

@@ -16,6 +16,8 @@ defines invariants; rustdoc defines public signatures and error behavior.
 src/
   lib.rs                         public domains and Error/Result exports
   error.rs                       shared structured errors
+  execution/
+    mod.rs                       shared controls and private per-operation budget
   algebra/
     field/mod.rs                 validated PrimeField and modular arithmetic
     column/mod.rs                private ordered sparse coefficient columns
@@ -36,10 +38,15 @@ src/
       simplex.rs                 canonical vertices, IDs and shared filtration order
       incidence.rs               oriented codimension-one boundary terms
   filtration/
+    provenance.rs                construction coverage and source-kind identity
+    expansion/mod.rs             contextual explicit result and controlled construction
     rips/
+      builder.rs                 exact borrowed settings and one-shot callbacks
       exact.rs                   ThresholdRips construction, provenance, cone bound
       expansion.rs               explicit Rips and dimension/scale provenance
       approximation/
+        builder.rs               approximate settings and one-shot callbacks
+        metadata.rs              owned sampling provenance and conditional bounds
         options.rs               epsilon, sampling and range parameters
         greedy.rs                deterministic farthest-point permutation
         edges.rs                 modified sparse edge values
@@ -57,7 +64,9 @@ src/
       expansion.rs               shared explicit clique construction
   persistence/
     mod.rs                       public exports and result normalization
-    execution.rs                 cooperative per-call limits/cancellation
+    execution.rs                 compatibility control imports
+    builder.rs                   borrowed analysis settings and validated execution
+    source.rs                    sealed extension and private source dispatch
     options.rs                   prime-field PersistenceOptions
     rips/
       mod.rs                     legacy/new Rips entry points and source coverage
@@ -83,7 +92,6 @@ src/
   diagram/
     interval.rs                  interval validation and endpoint semantics
     persistence_diagram.rs       owned multiset and coverage
-    approximation.rs             sparse Rips parameters, mapping and bound target
     computation.rs               owned PersistenceResult and source context
     representative.rs            owned chain/cochain terms and local interval IDs
   descriptors/                   diagram-only lifetimes and Betti curves
@@ -97,9 +105,10 @@ files. Public paths are re-exported from domains, not every private directory.
 | `algebra` | Validated prime fields and private sparse arithmetic/reduction | Error utilities |
 | `geometry` | Input validation and distance access | Error utilities |
 | `complex` | Checked weighted graphs and frozen simplicial incidence | Geometry scalar validation, error utilities |
-| `filtration` | Rips construction, provenance and shared flag access | Geometry, complex, diagram coverage/provenance types, error utilities |
-| `persistence` | Algorithms, options, interval and representative assembly | Algebra, geometry, filtration, diagram |
-| `diagram` | Algorithm-independent result ownership and validation | Algebra field identity, metric evidence types, error utilities |
+| `execution` | Immutable controls and private per-operation budget | Error utilities |
+| `filtration` | Rips construction, provenance and shared flag access | Geometry, complex, execution, error utilities |
+| `persistence` | Algorithms, options, interval and representative assembly | Algebra, geometry, filtration, diagram, execution |
+| `diagram` | Algorithm-independent result ownership and validation | Algebra field identity, filtration provenance, error utilities |
 | `descriptors` | Read diagrams without recomputing persistence | Diagram, error utilities |
 
 Geometry and diagram code do not call persistence. Filtration code does not call
@@ -120,6 +129,21 @@ access. `diagram` is a mathematical result container, not plotting, and
 belong to `geometry`; any future diagram-distance module needs a name that makes
 its different input domain explicit.
 
+## Public workflow and ownership
+
+`RipsBuilder` and `ApproximateRipsBuilder` configure borrowed inputs.
+`build_complex(max_simplex_dimension)` performs explicit construction and returns
+an owned `SimplicialFiltration`; only expanded topology exposes simplex queries.
+Alternatively, importing `persistence::PersistenceExt` enables `.persistence()`
+and the returned request's `.compute()`. The extension is implemented entirely
+in the consumer module, so filtration never calls persistence.
+
+Advanced `prepare()` returns an owned exact/approximate source for reuse. Callback
+builders are consumed by preparation or explicit construction; analyses never
+replay them. `Execution` is shared configuration, not a shared counter. A new
+private budget spans each terminal's preparation and computation. Legacy free
+functions retain their existing persistence-only scope and test coverage.
+
 ## Computation path
 
 The legacy point API and unrestricted richer point API use a condensed distance
@@ -127,16 +151,28 @@ buffer. The richer point API with a finite cutoff streams distances into a
 threshold graph. Supplied graphs never require a dense matrix. H0-only requests use
 union-find. F2 H0/H1 requests use the specialized implicit Rips path: ordered edges supply H0
 merges and candidate H1 births; triangle cofacets are generated during reverse
-coboundary reduction. Stored change-of-basis columns reconstruct reduced columns.
+coboundary reduction. Stored change-of-basis columns and virtual zero-lifetime
+apparent pairs supply later eliminations.
 
-Within `src/persistence/flag/cohomology/mod.rs`, `run_access` first classifies edges in forward
-order, then reduces their coboundaries in reverse order. `find_shortcut` handles
-apparent and emergent pairs on original columns; an unsuccessful search falls back to ordinary
-reduction. `TransformColumn` stores `EdgePosition` values in the ordered edge
-array, whereas `pivot_owners` maps triangle simplex IDs to `ColumnPosition` values
-in the stored-column array. These private types prevent treating the two array
-positions as interchangeable; combinatorial simplex IDs remain separate. The
-explicit reduced-column payload exists only in tests.
+Within `src/persistence/flag/cohomology/mod.rs`, `run_access` classifies edges in
+forward order and reduces their coboundaries in reverse order.
+`initialize_coboundary` scans each original column once, combining initialization
+with the apparent/emergent shortcut decision. If the first equal-valued candidate
+cannot take a shortcut, the collected cofacets form the ordinary working column.
+`initialize_two_pass` and its selection branch exist only under `cfg(test)` for
+independent comparisons.
+
+`pivot_owners` records only stored, non-virtual ownership: it maps triangle
+simplex IDs to `ColumnPosition` values in the stored-column array.
+`TransformColumn` holds `EdgePosition` values in the forward-ordered edge array.
+These private types distinguish the two array positions from each other and from
+combinatorial simplex IDs. Zero-lifetime apparent pairs occupy neither structure.
+For a pivot without a stored owner, `zero_apparent_facet` checks the mutual
+pairing conditions; the reduction loop then reconstructs the paired edge's full
+coboundary and adds its position to the active transformation. Only an edge
+already processed in reverse order can supply a virtual owner. This preserves
+the [reconstruction invariant](../reference/mathematics.md#implicit-reconstruction-invariant).
+Explicit reduced-column payloads and replay checks exist only in tests.
 
 Higher-dimensional and odd-prime requests dispatch to `cohomology/dimensions.rs`. This path
 classifies H0 edges, then advances through dimensions with clearing. It retains
@@ -154,7 +190,9 @@ of performance parity is made.
 Explicit expansion uses unique increasing-vertex extensions and freezes all
 stored simplices with lookup and both directions of incidence. Its ordering and
 the compact H1 entry order use the comparison authority in `complex/simplicial`.
-`RipsExpansion` retains construction dimension and scale provenance separately.
+`SimplicialFiltration` retains construction dimension and scale provenance
+separately for exact Rips, approximation and supplied flags. The old expansion
+types remain available during migration.
 Explicit computation reads its incidence, rejecting insufficient skeletons unless
 expansion certified clique exhaustion. Graph construction and expansion do not
 invoke persistence, and computation does not mutate stored topology.
@@ -266,7 +304,7 @@ for union-find. Oriented generic cohomology and representative reduction reuse
 this access without approximation-specific algebra. The blocker is hereditary,
 so unique-extension enumeration may prune rejected simplices safely.
 
-`diagram/approximation.rs` owns numerical parameters, full greedy order and radii,
+`filtration/rips/approximation/metadata.rs` owns numerical parameters, full greedy order and radii,
 retained IDs, metric evidence and conditional bound targets. This module depends
 only on geometry's evidence enum, not on a borrowed distance input or algorithm.
 Descriptors still consume ordinary diagrams; a caller choosing to discard result

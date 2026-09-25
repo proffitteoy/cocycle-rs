@@ -117,6 +117,15 @@ pub fn compute_flag_with_representatives(
     limits: &ExecutionLimits<'_>,
 ) -> Result<PersistenceResult> {
     let mut budget = WorkBudget::new(limits)?;
+    compute_flag_budget(input, options, requests, &mut budget)
+}
+
+pub(in crate::persistence) fn compute_flag_budget(
+    input: &FlagFiltration,
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    budget: &mut WorkBudget<'_>,
+) -> Result<PersistenceResult> {
     let graph = input.graph();
     let (cutoff, coverage) = match options.max_edge() {
         Some(t) if t < graph.max_edge() => (t, Coverage::Through(t)),
@@ -127,7 +136,7 @@ pub fn compute_flag_with_representatives(
         options,
         requests,
         coverage,
-        &mut budget,
+        budget,
         |budget| {
             compute_graph(
                 graph,

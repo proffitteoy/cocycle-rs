@@ -1,28 +1,24 @@
 //! Compute an F3 cycle and its dual cocycle at a specified Rips scale.
 use cocycle::algebra::PrimeField;
 use cocycle::diagram::RepresentativeKind;
+use cocycle::filtration::RipsBuilder;
 use cocycle::geometry::{DissimilarityMatrixView, MatrixLayout};
-use cocycle::persistence::{
-    ExecutionLimits, PersistenceOptions, RepresentativeRequest, RepresentativeSelection,
-    compute_rips_from_distances_with_representatives,
-};
+use cocycle::persistence::{PersistenceExt, RepresentativeRequest, RepresentativeSelection};
 
 fn main() -> cocycle::Result<()> {
     // Four-cycle edges enter at 1; diagonals enter at 2 and fill the cycle.
     let values = [1., 2., 1., 1., 2., 1.];
     let matrix = DissimilarityMatrixView::new(&values, 4, MatrixLayout::LowerTriangle)?;
-    let options = PersistenceOptions::new(1, None)?.with_field(PrimeField::new(3)?);
     let requests = [RepresentativeRequest::new(
         1,
         1.,
         RepresentativeSelection::Both,
     )?];
-    let result = compute_rips_from_distances_with_representatives(
-        matrix,
-        &options,
-        &requests,
-        &ExecutionLimits::default(),
-    )?;
+    let result = RipsBuilder::from_distance_matrix(matrix)
+        .persistence()
+        .field(PrimeField::new(3)?)
+        .representatives(&requests)
+        .compute()?;
     let representatives = result.representatives().unwrap();
     assert_eq!(representatives.len(), 2);
     assert_eq!(result.context().characteristic(), 3);

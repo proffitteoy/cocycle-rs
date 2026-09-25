@@ -2,6 +2,24 @@
 
 ## 0.1.0 (unreleased)
 
+- Initialize F2 H1 coboundaries in one pass with reusable safe buffers. Omit
+  stored zero-lifetime apparent pairs and reconstruct their transformations when
+  later columns need them. Avoid allocating discarded zero-lifetime H1 intervals.
+  Preserve public APIs, f64 ordering, coverage and interval multiplicity; extend
+  independent-oracle, transformation-replay and intermediate resource-failure
+  checks.
+
+- Add reusable exact/approximate Rips builders with explicit `build_complex`
+  construction and a shared `.persistence().compute()` analysis workflow. Preserve
+  implicit engines, fields, representatives, callback ownership and source coverage.
+- Add contextual `SimplicialFiltration` for exact, approximate and supplied-flag
+  expansion. Keep simplex queries on explicit topology; move source provenance
+  below result assembly while retaining existing import paths.
+- Add cooperative `Execution` controls spanning whole builder operations, including
+  preparation and expansion. Legacy functions/options remain compatibility entry
+  points with their existing control scope. Migrate guides, examples and native
+  workers without changing benchmark protocols or previously measured results.
+
 - Remove all repository-local historical experiment outputs and reports. Keep
   generated data in ignored local directories or external artifacts; enforce
   artifact admission in CI and bind concise future reports to measured commits.

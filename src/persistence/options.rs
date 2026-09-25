@@ -1,7 +1,8 @@
 //! Mathematical options shared by exact Rips and supplied flag computation.
-use crate::Result;
 use crate::algebra::PrimeField;
+use crate::filtration::Coverage;
 use crate::geometry::distance::cutoff;
+use crate::{Error, Result};
 
 /// Ordinary prime-field persistence options in arbitrary homology dimensions.
 ///
@@ -52,5 +53,29 @@ impl Default for PersistenceOptions {
             max_edge: None,
             field: PrimeField::default(),
         }
+    }
+}
+
+// Preserve original source coverage instead of inferring it from retained edges.
+pub(super) fn source_range(
+    coverage: Coverage,
+    max_edge: f64,
+    requested: Option<f64>,
+) -> Result<(f64, Coverage)> {
+    match coverage {
+        Coverage::Through(through) => {
+            let cutoff = requested.unwrap_or(through);
+            if cutoff > through {
+                return Err(Error::IncompleteFiltration {
+                    requested: cutoff,
+                    through,
+                });
+            }
+            Ok((cutoff, Coverage::Through(cutoff)))
+        }
+        Coverage::Complete => match requested {
+            Some(cutoff) if cutoff < max_edge => Ok((cutoff, Coverage::Through(cutoff))),
+            _ => Ok((max_edge, Coverage::Complete)),
+        },
     }
 }

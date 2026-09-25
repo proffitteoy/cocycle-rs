@@ -5,17 +5,7 @@ use std::cmp::Ordering;
 use super::interval::{IntervalEnd, PersistenceInterval, finite_scale};
 use crate::{Error, Result};
 
-/// The range over which a diagram was computed.
-///
-/// This describes coverage of the filtration, not a memory limit. A raw `Through`
-/// value is validated by [`PersistenceDiagram::new`].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Coverage {
-    /// All changes in the filtration are accounted for.
-    Complete,
-    /// All changes up to and including the given finite scale are accounted for.
-    Through(f64),
-}
+use crate::filtration::Coverage;
 
 /// An owned persistence diagram with explicitly recorded dimensions and coverage.
 ///

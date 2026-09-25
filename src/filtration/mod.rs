@@ -15,3 +15,17 @@ pub use rips::approximation::{
     SparseRips, SparseRipsExpansion, SparseRipsOptions, sparse_rips_from_distances,
     sparse_rips_from_points, sparse_rips_with_distance,
 };
+
+mod provenance;
+pub use provenance::{Coverage, FiltrationKind};
+pub use rips::approximation::{ApproximationTarget, RipsApproximation, RipsApproximationBound};
+
+pub(crate) mod expansion;
+pub use expansion::{FiltrationContext, SimplicialFiltration};
+pub use rips::{RipsBuilder, RipsCallbackBuilder};
+/// Owned exact preparation; compatibility name is [`ThresholdRips`].
+pub type RipsFiltration = ThresholdRips;
+/// Owned blocker-aware preparation; compatibility name is [`SparseRips`].
+pub type ApproximateRipsFiltration = SparseRips;
+
+pub use rips::approximation::{ApproximateRipsBuilder, ApproximateRipsCallbackBuilder};

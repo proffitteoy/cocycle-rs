@@ -2,7 +2,7 @@
 use cocycle::complex::{WeightedEdge, WeightedGraph};
 use cocycle::diagram::IntervalEnd;
 use cocycle::filtration::FlagFiltration;
-use cocycle::persistence::{ExecutionLimits, PersistenceOptions, compute_flag};
+use cocycle::persistence::PersistenceExt;
 fn main() -> cocycle::Result<()> {
     let edges = [[0, 1], [1, 2], [2, 3], [0, 3]]
         .into_iter()
@@ -12,11 +12,7 @@ fn main() -> cocycle::Result<()> {
         })
         .collect();
     let input = FlagFiltration::new(WeightedGraph::new(5, edges)?);
-    let result = compute_flag(
-        &input,
-        &PersistenceOptions::default(),
-        &ExecutionLimits::default(),
-    )?;
+    let result = input.persistence().compute()?;
     println!(
         "{:?}: {:?}",
         result.context().filtration_kind(),

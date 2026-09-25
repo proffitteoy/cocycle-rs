@@ -22,7 +22,11 @@ pub struct FilteredSimplicialComplex {
     cofacets: Vec<Vec<SimplexId>>,
 }
 impl FilteredSimplicialComplex {
-    pub(crate) fn from_simplices(mut simplices: Vec<Simplex>) -> Result<Self> {
+    pub(crate) fn from_simplices(
+        mut simplices: Vec<Simplex>,
+        checkpoint: &mut impl FnMut() -> Result<()>,
+    ) -> Result<Self> {
+        checkpoint()?;
         simplices.sort_unstable();
         let mut lookup = HashMap::new();
         lookup
@@ -37,6 +41,7 @@ impl FilteredSimplicialComplex {
             .try_reserve_exact(simplices.len())
             .map_err(|_| allocation())?;
         for (position, simplex) in simplices.iter().enumerate() {
+            checkpoint()?;
             let id = SimplexId(position);
             let mut boundary = Vec::new();
             if simplex.dimension() > 0 {
@@ -44,6 +49,7 @@ impl FilteredSimplicialComplex {
                     .try_reserve_exact(simplex.vertices.len())
                     .map_err(|_| allocation())?;
                 for omitted in 0..simplex.vertices.len() {
+                    checkpoint()?;
                     let mut vertices = simplex.vertices.clone();
                     vertices.remove(omitted);
                     let &face = lookup.get(&vertices).ok_or(Error::InternalInvariant {

@@ -1,28 +1,22 @@
 //! Approximate a point cloud with owned sampling provenance and requested bases.
 use cocycle::algebra::PrimeField;
-use cocycle::filtration::{SparseRipsOptions, sparse_rips_from_points};
+use cocycle::filtration::ApproximateRipsBuilder;
 use cocycle::geometry::{MetricPolicy, PointCloudView};
-use cocycle::persistence::{
-    ExecutionLimits, PersistenceOptions, RepresentativeRequest, RepresentativeSelection,
-    compute_sparse_rips_with_representatives,
-};
+use cocycle::persistence::{PersistenceExt, RepresentativeRequest, RepresentativeSelection};
 fn main() -> cocycle::Result<()> {
     let points = [0., 0., 1., 0., 1., 1., 0., 1., 0., 0.];
     let input = PointCloudView::new(&points, 5, 2)?;
-    let construction =
-        sparse_rips_from_points(input, &SparseRipsOptions::new(0.5, MetricPolicy::Check)?)?;
-    let options = PersistenceOptions::new(1, None)?.with_field(PrimeField::new(3)?);
+    let construction = ApproximateRipsBuilder::from_points(input, 0.5, MetricPolicy::Check);
     let requests = [RepresentativeRequest::new(
         1,
         1.,
         RepresentativeSelection::Both,
     )?];
-    let result = compute_sparse_rips_with_representatives(
-        &construction,
-        &options,
-        &requests,
-        &ExecutionLimits::default(),
-    )?;
+    let result = construction
+        .persistence()
+        .field(PrimeField::new(3)?)
+        .representatives(&requests)
+        .compute()?;
     let metadata = result.context().approximation().unwrap();
     println!(
         "original vertices: {}; retained: {:?}",

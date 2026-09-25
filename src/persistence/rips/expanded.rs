@@ -1,5 +1,5 @@
 //! Persistence from frozen Rips incidence with dimension and range checks.
-use crate::diagram::{ComputationContext, Coverage, FiltrationKind, PersistenceResult};
+use crate::diagram::{ComputationContext, FiltrationKind, PersistenceResult};
 use crate::filtration::{RipsExpansion, RipsInputKind, flag::ExplicitAccess};
 use crate::persistence::{
     ExecutionLimits, PersistenceOptions, RepresentativeRequest, execution::WorkBudget, flag,
@@ -40,48 +40,40 @@ pub fn compute_expanded_rips_with_representatives(
     limits: &ExecutionLimits<'_>,
 ) -> Result<PersistenceResult> {
     let mut budget = WorkBudget::new(limits)?;
+    compute_expanded_rips_budget(input, options, requests, &mut budget)
+}
+
+pub(in crate::persistence) fn compute_expanded_rips_budget(
+    input: &RipsExpansion,
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    budget: &mut WorkBudget<'_>,
+) -> Result<PersistenceResult> {
     if !input.complete && options.max_homology_dimension() >= input.max_simplex_dimension {
         return Err(Error::InsufficientSkeleton {
             requested_homology_dimension: options.max_homology_dimension(),
             constructed_simplex_dimension: input.max_simplex_dimension,
         });
     }
-    let (cutoff, coverage) = match input.coverage {
-        Coverage::Through(through) => {
-            let cutoff = options.max_edge().unwrap_or(through);
-            if cutoff > through {
-                return Err(Error::IncompleteFiltration {
-                    requested: cutoff,
-                    through,
-                });
-            }
-            (cutoff, Coverage::Through(cutoff))
-        }
-        Coverage::Complete => match options.max_edge() {
-            Some(cutoff) if cutoff < input.max_edge => (cutoff, Coverage::Through(cutoff)),
-            _ => (input.max_edge, Coverage::Complete),
-        },
-    };
+    let (cutoff, coverage) = crate::persistence::options::source_range(
+        input.coverage,
+        input.max_edge,
+        options.max_edge(),
+    )?;
     let access = ExplicitAccess {
         complex: &input.complex,
         vertex_count: input.vertex_count,
         cutoff,
     };
-    let (diagram, representatives) = flag::finish(
-        &access,
-        options,
-        requests,
-        coverage,
-        &mut budget,
-        |budget| {
+    let (diagram, representatives) =
+        flag::finish(&access, options, requests, coverage, budget, |budget| {
             flag::compute_simplicial(
                 &access,
                 options.max_homology_dimension(),
                 options.field(),
                 budget,
             )
-        },
-    )?;
+        })?;
     Ok(PersistenceResult {
         diagram,
         representatives,

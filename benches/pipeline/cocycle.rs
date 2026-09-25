@@ -2,16 +2,11 @@
 use cocycle::algebra::PrimeField;
 use cocycle::complex::{WeightedEdge, WeightedGraph};
 use cocycle::diagram::{Coverage, IntervalEnd, PersistenceResult};
-use cocycle::filtration::{
-    FlagFiltration, SparseRipsOptions, sparse_rips_from_distances, threshold_rips_from_distances,
-    threshold_rips_from_points,
-};
+use cocycle::execution::Execution;
+use cocycle::filtration::{ApproximateRipsBuilder, FlagFiltration, RipsBuilder};
 use cocycle::geometry::{DissimilarityMatrixView, MatrixLayout, MetricPolicy, PointCloudView};
 use cocycle::persistence::{
-    ExecutionLimits, PersistenceOptions, RepresentativeRequest, RepresentativeSelection,
-    compute_expanded_rips, compute_expanded_sparse_rips, compute_flag_with_representatives,
-    compute_rips_from_distances_with_representatives, compute_sparse_rips_with_representatives,
-    compute_threshold_rips_with_representatives,
+    PersistenceExt, PersistenceOptions, RepresentativeRequest, RepresentativeSelection,
 };
 use std::fmt::Write;
 use std::time::Instant;
@@ -99,7 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start = Instant::now();
     let mut phases = [0.; 5];
     let opts = PersistenceOptions::new(q, cutoff)?.with_field(PrimeField::new(p)?);
-    let limits = ExecutionLimits::default();
+    let limits = Execution::default();
     let requests = if args[5] == "yes" {
         vec![RepresentativeRequest::new(
             q,
@@ -118,14 +113,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         edge_count = Some(graph.edge_count());
         let input = FlagFiltration::new(graph);
         timed(&mut phases[3], || {
-            compute_flag_with_representatives(&input, &opts, &requests, &limits)
+            analyze(&input, &opts, &requests, &limits)
         })?
     } else if args[2] == "points" {
         let view = timed(&mut phases[0], || PointCloudView::new(&coordinates, n, 2))?;
-        let graph = timed(&mut phases[1], || threshold_rips_from_points(view, cutoff))?;
+        let mut builder = RipsBuilder::from_points(view);
+        if let Some(t) = cutoff {
+            builder = builder.max_edge_length(t);
+        }
+        let graph = timed(&mut phases[1], || builder.prepare())?;
         edge_count = Some(graph.graph().edge_count());
         timed(&mut phases[3], || {
-            compute_threshold_rips_with_representatives(&graph, &opts, &requests, &limits)
+            analyze(&graph, &opts, &requests, &limits)
         })?
     } else {
         let view = timed(&mut phases[0], || -> cocycle::Result<_> {
@@ -164,24 +163,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         phases[0] += matrix_start.elapsed().as_secs_f64() * 1000.;
         match args[2].as_str() {
             "dense" => timed(&mut phases[3], || {
-                compute_rips_from_distances_with_representatives(matrix, &opts, &requests, &limits)
+                analyze(
+                    &RipsBuilder::from_distance_matrix(matrix),
+                    &opts,
+                    &requests,
+                    &limits,
+                )
             })?,
             "threshold" | "expanded" => {
                 let graph = timed(&mut phases[1], || {
-                    threshold_rips_from_distances(matrix, cutoff)
+                    let mut builder = RipsBuilder::from_distance_matrix(matrix);
+                    if let Some(t) = cutoff {
+                        builder = builder.max_edge_length(t);
+                    }
+                    builder.prepare()
                 })?;
                 edge_count = Some(graph.graph().edge_count());
                 if args[2] == "expanded" {
-                    let expanded = timed(&mut phases[2], || graph.expand(q + 1))?;
+                    let expanded = timed(&mut phases[2], || graph.build_complex(q + 1))?;
                     simplex_count = Some(expanded.complex().len());
-                    timed(&mut phases[3], || {
-                        compute_expanded_rips(&expanded, &opts, &limits)
-                    })?
+                    timed(&mut phases[3], || analyze(&expanded, &opts, &[], &limits))?
                 } else {
                     timed(&mut phases[3], || {
-                        compute_threshold_rips_with_representatives(
-                            &graph, &opts, &requests, &limits,
-                        )
+                        analyze(&graph, &opts, &requests, &limits)
                     })?
                 }
             }
@@ -191,23 +195,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     MetricPolicy::Assume
                 };
-                let sparse_options =
-                    SparseRipsOptions::new(args[4].parse()?, policy)?.with_max_scale(cutoff)?;
-                let graph = timed(&mut phases[1], || {
-                    sparse_rips_from_distances(matrix, &sparse_options)
-                })?;
+                let mut builder =
+                    ApproximateRipsBuilder::from_distance_matrix(matrix, args[4].parse()?, policy);
+                if let Some(t) = cutoff {
+                    builder = builder.max_filtration_value(t);
+                }
+                let graph = timed(&mut phases[1], || builder.prepare())?;
                 edge_count = Some(graph.graph().edge_count());
                 retained = graph.graph().vertex_count();
                 order = graph.approximation().permutation().to_vec();
                 if args[2] == "approximate_expanded" {
-                    let expanded = timed(&mut phases[2], || graph.expand(q + 1))?;
+                    let expanded = timed(&mut phases[2], || graph.build_complex(q + 1))?;
                     simplex_count = Some(expanded.complex().len());
-                    timed(&mut phases[3], || {
-                        compute_expanded_sparse_rips(&expanded, &opts, &limits)
-                    })?
+                    timed(&mut phases[3], || analyze(&expanded, &opts, &[], &limits))?
                 } else {
                     timed(&mut phases[3], || {
-                        compute_sparse_rips_with_representatives(&graph, &opts, &requests, &limits)
+                        analyze(&graph, &opts, &requests, &limits)
                     })?
                 }
             }
@@ -257,4 +260,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     std::hint::black_box(result);
     Ok(())
+}
+
+// Preserve this worker's analysis range and field while exercising the public builder.
+fn analyze(
+    source: &impl PersistenceExt,
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    limits: &Execution,
+) -> cocycle::Result<cocycle::diagram::PersistenceResult> {
+    let mut request = source
+        .persistence()
+        .max_homology_dimension(options.max_homology_dimension())
+        .field(options.field())
+        .representatives(requests);
+    if let Some(cutoff) = options.max_edge() {
+        request = request.max_filtration_value(cutoff);
+    }
+    request.compute_with(limits)
 }

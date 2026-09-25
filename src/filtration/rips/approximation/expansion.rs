@@ -2,8 +2,8 @@
 use super::{SparseRips, SparseRipsAccess};
 use crate::Result;
 use crate::complex::FilteredSimplicialComplex;
-use crate::diagram::{Coverage, RipsApproximation};
 use crate::filtration::RipsInputKind;
+use crate::filtration::{Coverage, RipsApproximation};
 
 /// Explicit sparse Rips skeleton with original vertex labels.
 #[derive(Clone, Debug)]

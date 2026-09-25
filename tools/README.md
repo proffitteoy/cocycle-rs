@@ -82,9 +82,12 @@ listed in the native guide. No tests assert machine-dependent speed thresholds.
 
 ## Algorithm diagnostics
 
-[profile_rips.py](profile_rips.py) invokes six private cumulative H1 optimization
-stages and checks each against the independent explicit reducer. Use it to inspect
-algorithm work, not to rank public API performance.
+[profile_rips.py](profile_rips.py) invokes private H1 optimization stages and
+checks each against the independent explicit reducer. It varies single/two-pass
+initialization independently of virtual apparent-pair reconstruction; the
+[testing guide](../docs/development/testing.md#independent-invariants-and-properties)
+lists the stages. Use it to inspect algorithm work, not to rank public API
+performance.
 
 [profile_scaling.py](profile_scaling.py) reads the historical scaling artifact
 schema and requires matching source hashes and validated diagrams. It is not an

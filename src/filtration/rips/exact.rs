@@ -1,6 +1,6 @@
 //! Streamed exact Rips graph construction and original-input coverage.
 use crate::complex::{WeightedEdge, WeightedGraph};
-use crate::diagram::Coverage;
+use crate::filtration::Coverage;
 use crate::geometry::distance::{cutoff, nonnegative};
 use crate::geometry::{DissimilarityMatrixView, PointCloudView, euclidean_distance};
 use crate::{Error, Result};
@@ -110,15 +110,28 @@ fn build(
     kind: RipsInputKind,
     mut distance: impl FnMut(usize, usize) -> Result<f64>,
 ) -> Result<ThresholdRips> {
+    build_with(n, max_edge, kind, &mut distance, &mut || Ok(()))
+}
+
+pub(super) fn build_with(
+    n: usize,
+    max_edge: Option<f64>,
+    kind: RipsInputKind,
+    mut distance: impl FnMut(usize, usize) -> Result<f64>,
+    checkpoint: &mut impl FnMut() -> Result<()>,
+) -> Result<ThresholdRips> {
     let max_edge = cutoff(max_edge)?;
     n.checked_add(1).ok_or(Error::SizeOverflow {
         operation: "graph offsets",
     })?;
+    checkpoint()?;
     let mut diameter: f64 = 0.0;
     let mut edges = Vec::new();
     for b in 0..n {
         for a in 0..b {
+            checkpoint()?;
             let value = nonnegative(distance(a, b)?, "distance callback", None)?;
+            checkpoint()?;
             diameter = diameter.max(value);
             if max_edge.is_none_or(|t| value <= t) {
                 edges.try_reserve(1).map_err(|_| Error::AllocationFailed {
@@ -135,8 +148,11 @@ fn build(
         Some(t) if t < diameter => Coverage::Through(t),
         _ => Coverage::Complete,
     };
+    checkpoint()?;
+    let graph = WeightedGraph::new(n, edges)?;
+    checkpoint()?;
     Ok(ThresholdRips {
-        graph: WeightedGraph::new(n, edges)?,
+        graph,
         coverage,
         kind,
         requested_cutoff: max_edge,

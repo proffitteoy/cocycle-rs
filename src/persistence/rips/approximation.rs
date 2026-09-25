@@ -39,7 +39,20 @@ pub fn compute_sparse_rips_with_representatives(
     limits: &ExecutionLimits<'_>,
 ) -> Result<PersistenceResult> {
     let mut budget = WorkBudget::new(limits)?;
-    let (cutoff, coverage) = range(input.coverage, input.graph.max_edge(), options.max_edge())?;
+    compute_sparse_rips_budget(input, options, requests, &mut budget)
+}
+
+pub(in crate::persistence) fn compute_sparse_rips_budget(
+    input: &SparseRips,
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    budget: &mut WorkBudget<'_>,
+) -> Result<PersistenceResult> {
+    let (cutoff, coverage) = crate::persistence::options::source_range(
+        input.coverage,
+        input.graph.max_edge(),
+        options.max_edge(),
+    )?;
     let access = SparseRipsAccess { input, cutoff };
     compute(
         &access,
@@ -48,7 +61,7 @@ pub fn compute_sparse_rips_with_representatives(
         coverage,
         options,
         requests,
-        &mut budget,
+        budget,
     )
 }
 
@@ -73,13 +86,26 @@ pub fn compute_expanded_sparse_rips_with_representatives(
     limits: &ExecutionLimits<'_>,
 ) -> Result<PersistenceResult> {
     let mut budget = WorkBudget::new(limits)?;
+    compute_expanded_sparse_rips_budget(input, options, requests, &mut budget)
+}
+
+pub(in crate::persistence) fn compute_expanded_sparse_rips_budget(
+    input: &SparseRipsExpansion,
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    budget: &mut WorkBudget<'_>,
+) -> Result<PersistenceResult> {
     if !input.complete && options.max_homology_dimension() >= input.max_simplex_dimension {
         return Err(Error::InsufficientSkeleton {
             requested_homology_dimension: options.max_homology_dimension(),
             constructed_simplex_dimension: input.max_simplex_dimension,
         });
     }
-    let (cutoff, coverage) = range(input.coverage, input.max_edge, options.max_edge())?;
+    let (cutoff, coverage) = crate::persistence::options::source_range(
+        input.coverage,
+        input.max_edge,
+        options.max_edge(),
+    )?;
     let access = ExplicitAccess {
         complex: &input.complex,
         vertex_count: input.metadata.retained_vertices().len(),
@@ -92,9 +118,10 @@ pub fn compute_expanded_sparse_rips_with_representatives(
         coverage,
         options,
         requests,
-        &mut budget,
+        budget,
     )
 }
+
 fn compute(
     access: &impl SimplicialAccess,
     metadata: &RipsApproximation,
@@ -129,22 +156,4 @@ fn compute(
             construction_cutoff: metadata.max_scale(),
         },
     })
-}
-fn range(coverage: Coverage, max_edge: f64, requested: Option<f64>) -> Result<(f64, Coverage)> {
-    match coverage {
-        Coverage::Through(through) => {
-            let cutoff = requested.unwrap_or(through);
-            if cutoff > through {
-                return Err(Error::IncompleteFiltration {
-                    requested: cutoff,
-                    through,
-                });
-            }
-            Ok((cutoff, Coverage::Through(cutoff)))
-        }
-        Coverage::Complete => match requested {
-            Some(cutoff) if cutoff < max_edge => Ok((cutoff, Coverage::Through(cutoff))),
-            _ => Ok((max_edge, Coverage::Complete)),
-        },
-    }
 }

@@ -9,6 +9,7 @@ pub(super) fn permutation(
     n: usize,
     start: Option<usize>,
     distance: &mut impl FnMut(usize, usize) -> Result<f64>,
+    checkpoint: &mut impl FnMut() -> Result<()>,
 ) -> Result<Greedy> {
     if start.is_some_and(|v| v >= n) {
         return Err(Error::InvalidParameter {
@@ -39,11 +40,13 @@ pub(super) fn permutation(
     }
     let mut next = start.unwrap_or(0);
     for i in 0..n {
+        checkpoint()?;
         order.push(next);
         radii.push(if i == 0 { None } else { Some(nearest[next]) });
         selected[next] = true;
         let mut farthest = None;
         for v in 0..n {
+            checkpoint()?;
             if selected[v] {
                 continue;
             }

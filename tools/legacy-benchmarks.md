@@ -44,10 +44,11 @@ and environment before interpreting any result.
 
 ## Private H1 optimization profiling
 
-`profile_rips.py` builds release library tests and runs six cumulative stages:
-explicit cohomology, clearing, implicit reconstruction, cone stopping, apparent
-shortcuts and initial-column emergent shortcuts. Each stage uses a fresh process,
-one warmup and five measured samples, with reference validation after timing.
+`profile_rips.py` builds release library tests and runs the private H1 stages
+listed in the [testing guide](../docs/development/testing.md#independent-invariants-and-properties).
+They include independent single/two-pass initialization and stored/virtual
+apparent-owner configurations. Each stage uses a fresh process, one warmup and
+five measured samples, with reference validation after timing.
 Use newly generated wrapper fixtures from the command above:
 
 ```sh

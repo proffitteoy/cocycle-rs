@@ -59,3 +59,8 @@ fn assemble_diagram(
 
 #[cfg(test)]
 mod tests;
+
+mod builder;
+mod source;
+pub use builder::PersistenceBuilder;
+pub use source::PersistenceExt;

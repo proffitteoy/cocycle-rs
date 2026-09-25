@@ -1,11 +1,11 @@
 //! Sparse Rips native worker: topology, implicit/explicit persistence and basis parity.
 use cocycle::algebra::PrimeField;
 use cocycle::diagram::{Coverage, IntervalEnd};
-use cocycle::filtration::{SparseRipsOptions, sparse_rips_from_distances};
+use cocycle::execution::Execution;
+use cocycle::filtration::ApproximateRipsBuilder;
 use cocycle::geometry::{DissimilarityMatrixView, MatrixLayout, MetricPolicy};
 use cocycle::persistence::{
-    ExecutionLimits, PersistenceOptions, RepresentativeRequest, RepresentativeSelection,
-    compute_expanded_sparse_rips, compute_sparse_rips, compute_sparse_rips_with_representatives,
+    PersistenceExt, PersistenceOptions, RepresentativeRequest, RepresentativeSelection,
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
@@ -31,25 +31,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if values.len() != count {
         return Err("count".into());
     }
-    let mut options = SparseRipsOptions::new(args[2].parse()?, MetricPolicy::Check)?
-        .with_min_insertion_radius(args[3].parse()?)?
-        .with_max_scale(cutoff)?;
-    if n > 0 {
-        options = options.with_start_vertex(args[4].parse()?);
+    let matrix = DissimilarityMatrixView::new(&values, n, MatrixLayout::LowerTriangle)?;
+    let mut builder =
+        ApproximateRipsBuilder::from_distance_matrix(matrix, args[2].parse()?, MetricPolicy::Check)
+            .min_insertion_radius(args[3].parse()?);
+    if let Some(t) = cutoff {
+        builder = builder.max_filtration_value(t);
     }
-    let input = sparse_rips_from_distances(
-        DissimilarityMatrixView::new(&values, n, MatrixLayout::LowerTriangle)?,
-        &options,
-    )?;
+    if n > 0 {
+        builder = builder.start_vertex(args[4].parse()?);
+    }
+    let input = builder.prepare()?;
     let dimension: usize = args[5].parse()?;
-    let expanded = input.expand(dimension)?;
+    let expanded = input.build_complex(dimension)?;
     let compute = dimension > q || dimension >= n;
     let result = if compute {
         let opts = PersistenceOptions::new(q, None)?.with_field(PrimeField::new(characteristic)?);
-        let limits = ExecutionLimits::default();
-        let implicit = compute_sparse_rips(&input, &opts, &limits)?;
-        if implicit.diagram() != compute_expanded_sparse_rips(&expanded, &opts, &limits)?.diagram()
-        {
+        let limits = Execution::default();
+        let implicit = analyze(&input, &opts, &[], &limits)?;
+        if implicit.diagram() != analyze(&expanded, &opts, &[], &limits)?.diagram() {
             return Err("explicit disagreement".into());
         }
         let scale = match input.coverage() {
@@ -59,10 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let requests: Vec<_> = (0..=q)
             .map(|d| RepresentativeRequest::new(d, scale, RepresentativeSelection::Both))
             .collect::<Result<_, _>>()?;
-        if implicit.diagram()
-            != compute_sparse_rips_with_representatives(&input, &opts, &requests, &limits)?
-                .diagram()
-        {
+        if implicit.diagram() != analyze(&input, &opts, &requests, &limits)?.diagram() {
             return Err("representative disagreement".into());
         }
         Some(implicit)
@@ -111,4 +108,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("]}}");
     Ok(())
+}
+
+// Preserve this worker's analysis range and field while exercising the public builder.
+fn analyze(
+    source: &impl PersistenceExt,
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    limits: &Execution,
+) -> cocycle::Result<cocycle::diagram::PersistenceResult> {
+    let mut request = source
+        .persistence()
+        .max_homology_dimension(options.max_homology_dimension())
+        .field(options.field())
+        .representatives(requests);
+    if let Some(cutoff) = options.max_edge() {
+        request = request.max_filtration_value(cutoff);
+    }
+    request.compute_with(limits)
 }

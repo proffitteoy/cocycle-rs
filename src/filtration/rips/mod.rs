@@ -8,3 +8,6 @@ pub use exact::{
     threshold_rips_with_distance,
 };
 pub use expansion::RipsExpansion;
+
+pub(crate) mod builder;
+pub use builder::{RipsBuilder, RipsCallbackBuilder};

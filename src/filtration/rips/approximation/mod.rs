@@ -1,5 +1,7 @@
 //! Sparse Rips construction, separate from exact thresholds and supplied flags.
 mod access;
+mod metadata;
+pub use metadata::{ApproximationTarget, RipsApproximation, RipsApproximationBound};
 mod blocker;
 mod edges;
 mod expansion;
@@ -7,10 +9,10 @@ mod greedy;
 mod options;
 use super::RipsInputKind;
 use crate::complex::{WeightedEdge, WeightedGraph};
-use crate::diagram::{Coverage, RipsApproximation};
+use crate::filtration::Coverage;
 use crate::geometry::{
     DissimilarityMatrixView, MatrixLayout, PointCloudView, distance::nonnegative,
-    euclidean_distance, validate_metric_with,
+    euclidean_distance, validate_metric_with_checkpoints,
 };
 use crate::{Error, Result};
 pub(crate) use access::SparseRipsAccess;
@@ -118,14 +120,32 @@ fn build(
     kind: RipsInputKind,
     mut distance: impl FnMut(usize, usize) -> Result<f64>,
 ) -> Result<SparseRips> {
+    build_with(n, options, kind, &mut distance, &mut || Ok(()))
+}
+
+pub(super) fn build_with(
+    n: usize,
+    options: &SparseRipsOptions,
+    kind: RipsInputKind,
+    mut distance: impl FnMut(usize, usize) -> Result<f64>,
+    checkpoint: &mut impl FnMut() -> Result<()>,
+) -> Result<SparseRips> {
+    if options.start.is_some_and(|v| v >= n) {
+        return Err(Error::InvalidParameter {
+            parameter: "start_vertex",
+            reason: "outside input vertices",
+        });
+    }
+    checkpoint()?;
     // Validate even pairs subsequently removed by sampling or thresholds.
     for b in 0..n {
         for a in 0..b {
+            checkpoint()?;
             nonnegative(distance(a, b)?, "sparse distance", None)?;
         }
     }
-    let metric = validate_metric_with(n, options.policy, &mut distance)?;
-    let greedy = greedy::permutation(n, options.start, &mut distance)?;
+    let metric = validate_metric_with_checkpoints(n, options.policy, &mut distance, checkpoint)?;
+    let greedy = greedy::permutation(n, options.start, &mut distance, checkpoint)?;
     let kept = greedy
         .radii
         .iter()
@@ -148,6 +168,7 @@ fn build(
     let mut omitted_by_scale = false;
     for j in 1..kept {
         for i in 0..j {
+            checkpoint()?;
             let a = greedy.order[i];
             let b = greedy.order[j];
             if let Some(value) = edges::value(
@@ -176,8 +197,11 @@ fn build(
     } else {
         Coverage::Complete
     };
+    checkpoint()?;
+    let graph = WeightedGraph::new(kept, graph_edges)?;
+    checkpoint()?;
     Ok(SparseRips {
-        graph: WeightedGraph::new(kept, graph_edges)?,
+        graph,
         coverage,
         kind,
         radii,
@@ -199,3 +223,6 @@ fn allocation() -> Error {
         context: "sparse Rips construction",
     }
 }
+
+mod builder;
+pub use builder::{ApproximateRipsBuilder, ApproximateRipsCallbackBuilder};

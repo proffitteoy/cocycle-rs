@@ -45,6 +45,7 @@ and numbered derivations in one place; rustdoc owns individual API contracts.
 | Document | Status and purpose |
 | --- | --- |
 | [Roadmap](design/roadmap.md) | Selected priorities; not a delivery schedule |
+| [Rips API design](design/rips-api.md) | Implemented workflow design, execution boundaries and legacy compatibility/migration |
 | [Complete Rips subsystem](design/rips.md) | Rips target, original GUDHI/Ripser comparison, API sketches and current acceptance matrix; use guides/rustdoc for callable APIs |
 | [Rips acceptance audit](design/rips-acceptance.md) | R1-R10 evidence, resource boundaries and local/hosted validation distinction |
 | [Rips implementation scope](design/rips-implementation.md) | Stage-specific new directories, source moves, code/tooling changes and review units |

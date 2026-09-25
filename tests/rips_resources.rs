@@ -1,6 +1,8 @@
 //! Resource failures are local to a call and do not corrupt reusable inputs.
 use cocycle::algebra::PrimeField;
-use cocycle::diagram::PersistenceResult;
+use cocycle::diagram::{
+    Coverage, IntervalEnd, PersistenceDiagram, PersistenceInterval, PersistenceResult,
+};
 use cocycle::filtration::{
     FlagFiltration, SparseRipsOptions, sparse_rips_from_distances, threshold_rips_from_distances,
 };
@@ -10,6 +12,84 @@ use cocycle::{Error, Result};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 type Computation<'a> = Box<dyn Fn(&ExecutionLimits<'_>) -> Result<PersistenceResult> + 'a>;
+
+fn square_expectation(coverage: Coverage, h1_end: IntervalEnd) -> PersistenceDiagram {
+    // Four unit edges connect the vertices at 1 and create exactly one cycle.
+    // Diagonals at 2 kill it; absent diagonals leave it essential.
+    let mut intervals = vec![PersistenceInterval::new(0, 0., IntervalEnd::Finite(1.)).unwrap(); 3];
+    let h0_end = match coverage {
+        Coverage::Complete => IntervalEnd::Essential,
+        Coverage::Through(through) => IntervalEnd::RightCensored { through },
+    };
+    intervals.push(PersistenceInterval::new(0, 0., h0_end).unwrap());
+    intervals.push(PersistenceInterval::new(1, 1., h1_end).unwrap());
+    PersistenceDiagram::new(1, coverage, intervals).unwrap()
+}
+
+fn check_every_work_budget(
+    compute: impl Fn(&ExecutionLimits<'_>) -> Result<PersistenceResult>,
+    expected: &PersistenceDiagram,
+) {
+    // Do not hard-code the successful budget: optimizations change counted work.
+    // The cap only keeps a broken tiny-fixture test from looping indefinitely.
+    for limit in 0..=4096 {
+        match compute(&ExecutionLimits::new(Some(limit), None)) {
+            Err(error) => {
+                assert_eq!(error, Error::WorkLimitExceeded { limit });
+                assert_eq!(
+                    compute(&ExecutionLimits::default()).unwrap().diagram(),
+                    expected,
+                    "recovery after work limit {limit}"
+                );
+            }
+            Ok(result) => {
+                assert!(limit > 0);
+                assert_eq!(result.diagram(), expected);
+                assert_eq!(
+                    compute(&ExecutionLimits::new(Some(limit), None)).unwrap(),
+                    result
+                );
+                return;
+            }
+        }
+    }
+    panic!("tiny H1 fixture did not finish within the test's work-budget cap");
+}
+
+#[test]
+fn f2_h1_paths_recover_at_every_work_budget() {
+    let values = [1., 2., 1., 1., 2., 1.];
+    let view = DissimilarityMatrixView::new(&values, 4, MatrixLayout::LowerTriangle).unwrap();
+    let exact = threshold_rips_from_distances(view, None).unwrap();
+    let flag = FlagFiltration::new(exact.graph().clone());
+    for cutoff in [None, Some(1.)] {
+        let options = PersistenceOptions::new(1, cutoff).unwrap();
+        let (coverage, h1_end) =
+            cutoff.map_or((Coverage::Complete, IntervalEnd::Finite(2.)), |through| {
+                (
+                    Coverage::Through(through),
+                    IntervalEnd::RightCensored { through },
+                )
+            });
+        let expected = square_expectation(coverage, h1_end);
+        let paths: Vec<Computation<'_>> = vec![
+            Box::new(|limits| compute_rips_from_distances(view, &options, limits)),
+            Box::new(|limits| compute_threshold_rips(&exact, &options, limits)),
+            Box::new(|limits| compute_flag(&flag, &options, limits)),
+        ];
+        for compute in paths {
+            check_every_work_budget(compute, &expected);
+        }
+    }
+    // The supplied four-cycle has no later diagonals. Its surviving H1 class
+    // is essential, unlike the right-censored class of the truncated matrix.
+    let cycle = threshold_rips_from_distances(view, Some(1.)).unwrap();
+    let flag = FlagFiltration::new(cycle.graph().clone());
+    check_every_work_budget(
+        |limits| compute_flag(&flag, &PersistenceOptions::default(), limits),
+        &square_expectation(Coverage::Complete, IntervalEnd::Essential),
+    );
+}
 
 #[test]
 fn all_rips_paths_recover_after_budget_and_cancellation_failures() {
@@ -91,38 +171,26 @@ fn simultaneous_prime_field_calls_share_only_immutable_input() {
     let values = [1., 2., 1., 1., 2., 1.];
     let view = DissimilarityMatrixView::new(&values, 4, MatrixLayout::LowerTriangle).unwrap();
     let input = threshold_rips_from_distances(view, None).unwrap();
+    let expected = square_expectation(Coverage::Complete, IntervalEnd::Finite(2.));
     std::thread::scope(|scope| {
-        let handles: Vec<_> = [2, 3, 5, 251]
+        let handles: Vec<_> = [2, 2, 3, 5, 251]
             .into_iter()
             .map(|p| {
                 let input = &input;
+                let expected = &expected;
                 scope.spawn(move || {
                     let options = PersistenceOptions::new(1, None)
                         .unwrap()
                         .with_field(PrimeField::new(p).unwrap());
-                    let expected =
-                        compute_threshold_rips(input, &options, &ExecutionLimits::default())
-                            .unwrap();
-                    for _ in 0..4 {
-                        assert!(
-                            compute_threshold_rips(
-                                input,
-                                &options,
-                                &ExecutionLimits::new(Some(1), None)
-                            )
-                            .is_err()
-                        );
-                        assert_eq!(
-                            compute_threshold_rips(input, &options, &ExecutionLimits::default())
-                                .unwrap(),
-                            expected
-                        );
-                    }
-                    expected.into_diagram()
+                    check_every_work_budget(
+                        |limits| compute_threshold_rips(input, &options, limits),
+                        expected,
+                    );
                 })
             })
             .collect();
-        let diagrams: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
-        assert!(diagrams.windows(2).all(|pair| pair[0] == pair[1]));
+        for handle in handles {
+            handle.join().unwrap();
+        }
     });
 }

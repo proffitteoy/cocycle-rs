@@ -12,12 +12,12 @@ mod point_cloud;
 
 pub use dissimilarity::DissimilarityView;
 pub(crate) use dissimilarity::pair_count;
-pub(crate) use euclidean::{euclidean_distance, euclidean_distances};
+pub(crate) use euclidean::{euclidean_distance, euclidean_distances, euclidean_distances_with};
 pub use point_cloud::PointCloudView;
 
 pub(crate) mod distance;
 mod matrix;
 mod metric;
 pub use matrix::{DissimilarityMatrixView, MatrixLayout};
-pub(crate) use metric::validate_metric_with;
+pub(crate) use metric::validate_metric_with_checkpoints;
 pub use metric::{MetricPolicy, MetricValidation, validate_metric};

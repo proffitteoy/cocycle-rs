@@ -13,8 +13,8 @@ use super::execution::WorkBudget;
 use super::flag;
 use super::{ExecutionLimits, PersistenceOptions, RepresentativeRequest};
 use crate::filtration::flag::CliqueAccess;
-mod approximation;
-mod expanded;
+pub(super) mod approximation;
+pub(super) mod expanded;
 pub use approximation::{
     compute_expanded_sparse_rips, compute_expanded_sparse_rips_with_representatives,
     compute_sparse_rips, compute_sparse_rips_with_representatives,
@@ -127,8 +127,18 @@ pub fn compute_rips_from_distances_with_representatives(
     requests: &[RepresentativeRequest],
     limits: &ExecutionLimits<'_>,
 ) -> Result<crate::diagram::PersistenceResult> {
-    use crate::diagram::{ComputationContext, FiltrationKind, PersistenceResult};
     let mut budget = WorkBudget::new(limits)?;
+    compute_rips_from_distances_budget(input, options, requests, &mut budget)
+}
+
+pub(in crate::persistence) fn compute_rips_from_distances_budget(
+    input: crate::geometry::DissimilarityMatrixView<'_>,
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    budget: &mut WorkBudget<'_>,
+) -> Result<crate::diagram::PersistenceResult> {
+    use crate::diagram::{ComputationContext, FiltrationKind, PersistenceResult};
+
     let (cutoff, coverage) = match options.max_edge() {
         Some(t) if t < input.diameter() => (t, Coverage::Through(t)),
         _ => (input.diameter(), Coverage::Complete),
@@ -138,7 +148,7 @@ pub fn compute_rips_from_distances_with_representatives(
         options,
         requests,
         coverage,
-        &mut budget,
+        budget,
         |budget| {
             flag::compute_dense(
                 input,
@@ -196,31 +206,30 @@ pub fn compute_threshold_rips_with_representatives(
     requests: &[RepresentativeRequest],
     limits: &ExecutionLimits<'_>,
 ) -> Result<crate::diagram::PersistenceResult> {
+    let mut budget = WorkBudget::new(limits)?;
+    compute_threshold_rips_budget(input, options, requests, &mut budget)
+}
+
+pub(in crate::persistence) fn compute_threshold_rips_budget(
+    input: &crate::filtration::ThresholdRips,
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    budget: &mut WorkBudget<'_>,
+) -> Result<crate::diagram::PersistenceResult> {
     use crate::diagram::{ComputationContext, FiltrationKind, PersistenceResult};
     use crate::filtration::RipsInputKind;
-    let mut budget = WorkBudget::new(limits)?;
-    let (cutoff, coverage) = match input.coverage() {
-        Coverage::Through(through) => {
-            let t = options.max_edge().unwrap_or(through);
-            if t > through {
-                return Err(crate::Error::IncompleteFiltration {
-                    requested: t,
-                    through,
-                });
-            }
-            (t, Coverage::Through(t))
-        }
-        Coverage::Complete => match options.max_edge() {
-            Some(t) if t < input.graph().max_edge() => (t, Coverage::Through(t)),
-            _ => (input.graph().max_edge(), Coverage::Complete),
-        },
-    };
+
+    let (cutoff, coverage) = crate::persistence::options::source_range(
+        input.coverage(),
+        input.graph().max_edge(),
+        options.max_edge(),
+    )?;
     let (diagram, representatives) = flag::finish(
         &CliqueAccess::Sparse(input.graph(), cutoff),
         options,
         requests,
         coverage,
-        &mut budget,
+        budget,
         |budget| {
             flag::compute_graph(
                 input.graph(),

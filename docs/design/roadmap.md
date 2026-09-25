@@ -34,6 +34,14 @@ crate has not been published. See the [construction guide](../guides/rips-constr
 
 ## Next priorities
 
+The [API design](rips-api.md) is implemented with a compatibility stage:
+`RipsBuilder::build_complex` creates inspectable topology and `.persistence()`
+configures direct analysis. Approximation, callback ownership, source context and
+whole-operation execution controls follow the same contracts. Guides and native
+workers use the new paths. Legacy names and functions remain available; removing
+them requires a separately declared pre-release breaking revision. Algorithm
+optimizations and new filtration families remain separate review units.
+
 1. **Complete the Rips subsystem.** Follow the
    [delivery sequence and exit gates](rips.md#delivery-sequence-and-exit-gates):
    exact sparse input through computation, explicit and higher-dimensional Rips,

@@ -2,7 +2,7 @@
 use super::{RipsInputKind, ThresholdRips};
 use crate::Result;
 use crate::complex::FilteredSimplicialComplex;
-use crate::diagram::Coverage;
+use crate::filtration::Coverage;
 
 /// A frozen exact Rips skeleton and the provenance needed to interpret it.
 ///

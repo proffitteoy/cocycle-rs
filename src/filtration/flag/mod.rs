@@ -3,7 +3,7 @@ mod access;
 mod cliques;
 mod expansion;
 pub(crate) use cliques::{CliqueAccess, ExplicitAccess, SimplicialAccess, next_dimension};
-pub(crate) use expansion::{expand, expand_access};
+pub(crate) use expansion::{expand, expand_access, expand_access_with};
 mod dense;
 mod index;
 mod order;

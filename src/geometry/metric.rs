@@ -45,6 +45,15 @@ pub(crate) fn validate_metric_with(
     policy: MetricPolicy,
     mut distance: impl FnMut(usize, usize) -> Result<f64>,
 ) -> Result<MetricValidation> {
+    validate_metric_with_checkpoints(n, policy, &mut distance, &mut || Ok(()))
+}
+
+pub(crate) fn validate_metric_with_checkpoints(
+    n: usize,
+    policy: MetricPolicy,
+    mut distance: impl FnMut(usize, usize) -> Result<f64>,
+    checkpoint: &mut impl FnMut() -> Result<()>,
+) -> Result<MetricValidation> {
     match policy {
         MetricPolicy::Assume => return Ok(MetricValidation::Assumed),
         MetricPolicy::Unchecked => return Ok(MetricValidation::Unchecked),
@@ -56,10 +65,13 @@ pub(crate) fn validate_metric_with(
                 let x = distance(a, b)?;
                 let y = distance(a, c)?;
                 let z = distance(b, c)?;
-                if exceeds_sum(x, y, z) || exceeds_sum(y, x, z) || exceeds_sum(z, x, y) {
-                    return Err(Error::InvalidMetric {
-                        vertices: [a, b, c],
-                    });
+                for (long, first, second) in [(x, y, z), (y, x, z), (z, x, y)] {
+                    checkpoint()?;
+                    if exceeds_sum(long, first, second) {
+                        return Err(Error::InvalidMetric {
+                            vertices: [a, b, c],
+                        });
+                    }
                 }
             }
         }

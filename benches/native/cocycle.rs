@@ -4,8 +4,9 @@ use std::io;
 use std::time::Instant;
 
 use cocycle::diagram::{Coverage, IntervalEnd};
+use cocycle::filtration::RipsBuilder;
 use cocycle::geometry::DissimilarityView;
-use cocycle::persistence::{RipsOptions, rips_from_dissimilarities};
+use cocycle::persistence::PersistenceExt;
 
 fn memory(field: &str) -> String {
     std::fs::read_to_string("/proc/self/status")
@@ -38,7 +39,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let n = usize::try_from(integer(16))?;
     let q = usize::try_from(integer(32))?;
     let cutoff = f64::from_le_bytes(bytes[40..48].try_into()?);
-    let options = RipsOptions::new(q, (!cutoff.is_nan()).then_some(cutoff))?;
     let values: Vec<_> = bytes[48..]
         .chunks_exact(8)
         .map(|chunk| f64::from_le_bytes(chunk.try_into().unwrap()))
@@ -50,12 +50,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(io::Error::other("expected float32-exact filtration").into());
     }
     let input = DissimilarityView::new(&values, n)?;
+    let rips = RipsBuilder::from_distance_matrix(input.into());
+    let mut request = rips.persistence().max_homology_dimension(q);
+    if !cutoff.is_nan() {
+        request = request.max_filtration_value(cutoff);
+    }
     let rss = memory("VmRSS:");
     let hwm = memory("VmHWM:");
     let start = Instant::now();
-    let diagram = black_box(rips_from_dissimilarities(input, &options)?);
+    let result = black_box(request.compute()?);
     let elapsed = start.elapsed().as_secs_f64() * 1000.0;
     let peak = memory("VmHWM:");
+    let diagram = result.diagram();
     print!(
         "{{\"status\":\"completed\",\"elapsed_ms\":{elapsed},\"execution_path\":\"public_api\",\"rss_before_kib\":{rss},\"hwm_before_kib\":{hwm},\"peak_rss_kib\":{peak},"
     );

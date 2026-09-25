@@ -4,7 +4,7 @@
 
 Exact Rips and supplied flag computations support any prime `u32` characteristic.
 The default remains F2. The legacy `RipsOptions` functions retain their original
-F2 H0/H1 contract; use `PersistenceOptions` with the richer `compute_*` functions
+F2 H0/H1 contract; use `.field(PrimeField)` on the persistence builder
 for field selection. See [construction](rips-construction.md) for input layouts,
 explicit expansion and coverage.
 
@@ -12,11 +12,9 @@ explicit expansion and coverage.
 
 ```rust
 use cocycle::algebra::PrimeField;
-use cocycle::persistence::PersistenceOptions;
 
 let field = PrimeField::new(5)?;
-let options = PersistenceOptions::new(2, Some(1.5))?.with_field(field);
-assert_eq!(options.field().characteristic(), 5);
+assert_eq!(field.characteristic(), 5);
 assert_eq!(field.multiply(4, 4), 1);
 assert_eq!(field.inverse(2)?, 3);
 assert!(PrimeField::new(9).is_err());
@@ -36,28 +34,26 @@ odd-prime homology. Field selection is a mathematical input, not a speed switch.
 
 ## Request a basis at a scale
 
-Each richer computation has an opt-in `_with_representatives` counterpart taking
-`(input, options, requests, limits)`. `RepresentativeRequest` specifies a dimension,
+Each supported source uses the same `.persistence().representatives(&requests)`
+request. `RepresentativeRequest` specifies a dimension,
 finite nonnegative scale and `Cycles`, `Cocycles` or `Both`. One representative of
 each selected kind is returned for every interval active at that query.
 
 ```rust
 use cocycle::algebra::PrimeField;
 use cocycle::diagram::RepresentativeKind;
+use cocycle::filtration::RipsBuilder;
 use cocycle::geometry::{DissimilarityMatrixView, MatrixLayout};
 use cocycle::persistence::{
-    ExecutionLimits, PersistenceOptions, RepresentativeRequest,
-    RepresentativeSelection, compute_rips_from_distances_with_representatives,
+    PersistenceExt, RepresentativeRequest, RepresentativeSelection,
 };
 
 // A four-cycle at scale 1; diagonal edges fill it at scale 2.
 let values = [1., 2., 1., 1., 2., 1.];
 let matrix = DissimilarityMatrixView::new(&values, 4, MatrixLayout::LowerTriangle)?;
-let options = PersistenceOptions::new(1, None)?.with_field(PrimeField::new(3)?);
 let requests = [RepresentativeRequest::new(1, 1., RepresentativeSelection::Both)?];
-let result = compute_rips_from_distances_with_representatives(
-    matrix, &options, &requests, &ExecutionLimits::default(),
-)?;
+let result = RipsBuilder::from_distance_matrix(matrix).persistence()
+    .field(PrimeField::new(3)?).representatives(&requests).compute()?;
 let representatives = result.representatives().unwrap();
 assert_eq!(representatives.len(), 2);
 assert_eq!(representatives[0].kind(), RepresentativeKind::Cycle);
@@ -123,8 +119,9 @@ workspace and coefficients. No large-input performance parity is claimed.
 The cooperative execution budget covers representative skeleton enumeration,
 reduction, dual solves and output construction. Allocation and sorting phases
 remain internally uninterruptible; no hard memory/RSS bound is provided. Failures
-return no partial result. Standalone graph construction and `expand` remain
-outside persistence execution controls.
+return no partial result. Builder terminals share controls with their preparation phases. Separately called
+`prepare_with` and `build_complex_with` each start an independent budget. Legacy
+free functions retain their older control scope.
 
 Run `cargo run --locked --example rips_representatives`. Native correctness checks
 compare diagrams against pinned GUDHI and Ripser C++ with matching fields; they

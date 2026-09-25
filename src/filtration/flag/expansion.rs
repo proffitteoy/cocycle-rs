@@ -15,10 +15,20 @@ pub(crate) fn expand_access(
     access: &impl SimplicialAccess,
     max_dimension: usize,
 ) -> Result<(FilteredSimplicialComplex, bool)> {
+    expand_access_with(access, max_dimension, &mut || Ok(()))
+}
+
+pub(crate) fn expand_access_with(
+    access: &impl SimplicialAccess,
+    max_dimension: usize,
+    checkpoint: &mut impl FnMut() -> Result<()>,
+) -> Result<(FilteredSimplicialComplex, bool)> {
+    checkpoint()?;
     let mut level = access.vertices()?;
     let mut simplices = Vec::new();
     let mut complete = level.is_empty();
     for dimension in 0..=max_dimension.min(access.vertex_count().saturating_sub(1)) {
+        checkpoint()?;
         simplices
             .try_reserve(level.len())
             .map_err(|_| Error::AllocationFailed {
@@ -30,7 +40,7 @@ pub(crate) fn expand_access(
         if dimension == max_dimension || dimension + 1 == access.vertex_count() {
             complete = true;
             for simplex in &level {
-                access.visit_cofacets(simplex, true, &mut || Ok(()), |_| {
+                access.visit_cofacets(simplex, true, checkpoint, |_| {
                     complete = false;
                     Ok(())
                 })?;
@@ -40,14 +50,14 @@ pub(crate) fn expand_access(
             }
             break;
         }
-        level = next_dimension(access, &level, &mut || Ok(()))?;
+        level = next_dimension(access, &level, checkpoint)?;
         if level.is_empty() {
             complete = true;
             break;
         }
     }
     Ok((
-        FilteredSimplicialComplex::from_simplices(simplices)?,
+        FilteredSimplicialComplex::from_simplices(simplices, checkpoint)?,
         complete,
     ))
 }

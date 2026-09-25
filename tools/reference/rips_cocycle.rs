@@ -2,13 +2,11 @@
 use cocycle::algebra::PrimeField;
 use cocycle::complex::{WeightedEdge, WeightedGraph};
 use cocycle::diagram::{Coverage, IntervalEnd};
-use cocycle::filtration::{FlagFiltration, threshold_rips_from_distances};
+use cocycle::execution::Execution;
+use cocycle::filtration::{FlagFiltration, RipsBuilder};
 use cocycle::geometry::{DissimilarityMatrixView, MatrixLayout};
 use cocycle::persistence::{
-    ExecutionLimits, PersistenceOptions, RepresentativeRequest, RepresentativeSelection,
-    compute_expanded_rips, compute_flag, compute_flag_with_representatives,
-    compute_rips_from_distances, compute_threshold_rips,
-    compute_threshold_rips_with_representatives,
+    PersistenceExt, PersistenceOptions, RepresentativeRequest, RepresentativeSelection,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -36,30 +34,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cutoff.unwrap_or(1.).min(1.),
         RepresentativeSelection::Both,
     )?];
-    let limits = ExecutionLimits::default();
+    let limits = Execution::default();
     let (edges, result, complex) = if mode == "dense" {
         let values: Vec<f64> = words.map(str::parse).collect::<Result<_, _>>()?;
         if values.len() != count {
             return Err("value count".into());
         }
         let matrix = DissimilarityMatrixView::new(&values, n, MatrixLayout::LowerTriangle)?;
-        let construction = threshold_rips_from_distances(matrix, cutoff)?;
-        let result = compute_threshold_rips(&construction, &options, &limits)?;
-        let represented = compute_threshold_rips_with_representatives(
-            &construction,
-            &options,
-            &requests,
-            &limits,
-        )?;
+        let mut rips = RipsBuilder::from_distance_matrix(matrix);
+        if let Some(t) = cutoff {
+            rips = rips.max_edge_length(t);
+        }
+        let construction = rips.prepare()?;
+        let result = analyze(&construction, &options, &[], &limits)?;
+        let represented = analyze(&construction, &options, &requests, &limits)?;
         if result.diagram() != represented.diagram() {
             return Err("representative diagram disagreement".into());
         }
         // Exercise the new dense layout engine on every dense fixture too.
-        if result.diagram() != compute_rips_from_distances(matrix, &options, &limits)?.diagram() {
+        if result.diagram()
+            != analyze(
+                &RipsBuilder::from_distance_matrix(matrix),
+                &options,
+                &[],
+                &limits,
+            )?
+            .diagram()
+        {
             return Err("dense/sparse disagreement".into());
         }
-        let expanded = construction.expand(q + 1)?;
-        if result.diagram() != compute_expanded_rips(&expanded, &options, &limits)?.diagram() {
+        let expanded = construction.build_complex(q + 1)?;
+        if result.diagram() != analyze(&expanded, &options, &[], &limits)?.diagram() {
             return Err("implicit/explicit disagreement".into());
         }
         (
@@ -79,9 +84,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
         let filtration = FlagFiltration::new(WeightedGraph::new(n, edges)?);
-        let result = compute_flag(&filtration, &options, &limits)?;
-        let represented =
-            compute_flag_with_representatives(&filtration, &options, &requests, &limits)?;
+        let result = analyze(&filtration, &options, &[], &limits)?;
+        let represented = analyze(&filtration, &options, &requests, &limits)?;
         if result.diagram() != represented.diagram() {
             return Err("representative diagram disagreement".into());
         }
@@ -93,7 +97,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .copied()
             .collect::<Vec<_>>();
         let filtered = FlagFiltration::new(WeightedGraph::new(n, edges.clone())?);
-        (edges, result, filtered.expand(q + 1)?)
+        (
+            edges,
+            result,
+            filtered.build_complex(q + 1)?.complex().clone(),
+        )
     } else {
         return Err("unknown mode".into());
     };
@@ -136,4 +144,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("]}}");
     Ok(())
+}
+
+// Preserve this worker's analysis range and field while exercising the public builder.
+fn analyze(
+    source: &impl PersistenceExt,
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    limits: &Execution,
+) -> cocycle::Result<cocycle::diagram::PersistenceResult> {
+    let mut request = source
+        .persistence()
+        .max_homology_dimension(options.max_homology_dimension())
+        .field(options.field())
+        .representatives(requests);
+    if let Some(cutoff) = options.max_edge() {
+        request = request.max_filtration_value(cutoff);
+    }
+    request.compute_with(limits)
 }

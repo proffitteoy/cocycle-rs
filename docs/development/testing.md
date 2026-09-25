@@ -17,12 +17,12 @@ protocols belong in the [benchmark guide](../../benches/README.md).
 | `tests/rips_construction.rs`, `tests/flag.rs` | Construction coverage, callbacks, sparse results, limits/cancellation and isolated vertices |
 | `tests/rips_expansion.rs` | Oriented incidence, skeleton sufficiency, H2/H3/H4 spheres, independent high-dimensional boundary oracle and sparse resource regression |
 | `tests/prime_fields.rs` | Full-u32 modular arithmetic, field-sensitive flag RP2, independent ranks, cycle/cocycle closure, nontriviality, duality and interval identity |
-| `tests/rips_resources.rs` | Budget/cancellation recovery across 12 paths and concurrent independent prime-field calls |
+| `tests/rips_resources.rs` | Budget/cancellation recovery across public paths, every-work-budget F2/H1 retry, and concurrent read-only F2/H1 and prime-field calls |
 | `tests/sparse_rips.rs` | Metric hypotheses, sampling provenance, blocker topology, original IDs, approximate coverage and computation parity |
 | `tests/descriptors.rs` | Formula, endpoint, exclusion, overflow, and empty-result behavior |
 | `src/persistence/reference/` | Independent explicit filtration and boundary reducer |
 | `src/filtration/flag/dense.rs` tests | Indexing, overflow, and independent cofacet enumeration |
-| `src/persistence/flag/cohomology/tests.rs` | Seven optimization settings, duality, and difficult numeric cases |
+| `src/persistence/flag/cohomology/tests.rs` | Independent optimization combinations, transformation replay, duality, cancellation checkpoints and difficult numeric cases |
 | `tools/test_*.py` | Source/documentation checks, external comparison, and benchmark protocol behavior |
 
 The two ignored profiling tests are deliberately invoked only by developer tools.
@@ -79,12 +79,29 @@ Complete bipartite fixtures additionally use the analytic multiplicities in
 - Descriptor tests check entropy ln(2) for two equal lifetimes, zero for one,
   `None` for none, and explicit exclusion of essential/censored intervals.
 
-The cohomology tests compare seven settings: explicit cohomology, clearing,
-implicit reconstruction, cone stopping, apparent only, emergent only, and both
-shortcuts. They cover all 729 four-vertex distance assignments from {0,1,2},
-random f64/nonmetric inputs, ties, adjacent floats, subnormals, huge scales, and
-cutoff endpoints. Reversed-transpose matrix tests check pair and unpaired-index
-mapping independently of production simplex indexing.
+The cohomology tests compare explicit cohomology, clearing, implicit
+reconstruction, cone stopping and apparent/emergent shortcuts. Two additional
+independent axes compare single-pass versus two-pass initialization and stored
+apparent owners versus virtual zero-apparent reconstruction. The combinations
+cover all 729 four-vertex distance assignments from {0,1,2}, random f64/nonmetric
+inputs, ties, adjacent floats, subnormals, huge scales and cutoff endpoints.
+Reversed-transpose matrix tests check pair and unpaired-index mapping independently
+of production simplex indexing.
+
+Dense and sparse tests independently replay each stored transformation by XORing
+its original edge coboundaries and compare the result with the reduced column,
+checking $R=CV$ as well as diagram equality. Directed cases exercise an occupied
+first equal-valued cofacet, alternating heap capacities, parity cancellation and
+repeated virtual-owner use. F2/H1 resource tests interrupt at every work budget
+below completion and retry the same read-only input; private tests also cancel
+at each cofacet checkpoint. Concurrent calls verify per-call state isolation.
+
+The diagnostic stages in `tools/profile_rips.py` are `explicit`, `clearing`,
+`implicit`, `cone`, `apparent`, `two-pass`, `emergent`, `virtual-two-pass` and
+`virtual`. The historical `emergent` stage includes both apparent and emergent
+shortcuts; its `two-pass` counterpart changes only initialization. The two virtual
+stages add apparent-pair omission. Each stage checks the independent explicit
+oracle; its instrumented timings do not rank production performance.
 
 ## External comparison
 
