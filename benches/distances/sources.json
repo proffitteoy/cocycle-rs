@@ -1,0 +1,23 @@
+{
+  "topp": {
+    "repository": "https://github.com/proffitteoy/Topp.git",
+    "revision": "ffa1da051ca7ac5e313c74cc9fb92a2bcb20c234",
+    "version": "1.0.1"
+  },
+  "bottleneck_reference": {
+    "backend": "gudhi.hera.bottleneck_distance",
+    "delta": 0.0
+  },
+  "gudhi_bottleneck": {
+    "repository": "https://github.com/GUDHI/gudhi-devel.git",
+    "revision": "4ec34ac55e6d2e8cfd7c322e84c1b0a56d516d51",
+    "upstream_merge": "1ee115515e256ab37700a539c277713755590834",
+    "pull_request": "https://github.com/GUDHI/gudhi-devel/pull/1367",
+    "e": 0.0
+  },
+  "gudhi_python": {
+    "gudhi": "3.11.0",
+    "numpy": "2.4.6",
+    "POT": "0.9.6.post1"
+  }
+}

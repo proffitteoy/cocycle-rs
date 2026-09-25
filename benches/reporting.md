@@ -3,8 +3,9 @@
 [Benchmarks](README.md)
 
 This page owns the rules for new performance claims and retained reports. Each
-suite owns its execution contract: [H0/H1 native](protocol.md) or
-[Rips pipeline](pipeline/README.md). Use the [report template](report-template.md)
+suite owns its execution contract: [H0/H1 native](protocol.md),
+[Rips pipeline](pipeline/README.md) or [diagram distances](distances/README.md).
+Use the [report template](report-template.md)
 for a new experiment. The source repository stores code and concise reports;
 all generated run data lives outside Git.
 
@@ -17,8 +18,10 @@ all generated run data lives outside Git.
 | Comparative performance study | Scoped cross-library or before/after conclusions with repeated, comparable measurements | Behavior on unmeasured inputs, environments or revisions |
 
 State the class and question before the numbers. New external performance
-measurements use native GUDHI C++ and upstream Ripser C++. Python may orchestrate
-processes; optional Python-wrapper tools do not qualify as native comparisons.
+measurements use native GUDHI C++ and upstream Ripser C++ for persistence, and
+Topp C++ for diagram distances. Python may orchestrate processes; isolated
+GUDHI/POT distance workers supply correctness evidence only and do not qualify
+as native timing comparisons.
 Name the actual engine and adapter, not just the library: GUDHI direct expansion,
 GUDHI edge collapse and GUDHI's integrated Ripser are different paths.
 
@@ -109,9 +112,18 @@ explanation. Unsupported capabilities are explicit exclusions, never zero times.
 
 Link the exact protocol and record the worker/controller source fingerprint.
 Use the machine-emitted protocol identity when available (`cocycle-native-v1`
-for H0/H1 and `cocycle-rips-pipeline-v2` for the pipeline). Preserve the description
+for H0/H1, `cocycle-rips-pipeline-v2` for the pipeline, and
+`cocycle-distance-v1` for diagram distances). Preserve the description
 and source hash too. Earlier unversioned pipeline runs used a fixed backend order.
 A prose label alone must not imply a new protocol was executed.
+
+The table below compares the two persistence protocols. The
+[distance protocol](distances/README.md#timing-and-sampling) separately owns its
+f64 endpoint format and validation/preparation/solve/cleanup boundary. It uses
+fresh serial workers with a discarded warmup, records process RSS and capacity
+counters separately, and excludes GUDHI/POT times from rankings. Distance
+ablation workers compile counters explicitly; they do not measure the ordinary
+uninstrumented public API. Preserve that distinction in every report.
 
 | Boundary | H0/H1 native | Rips pipeline |
 | --- | --- | --- |

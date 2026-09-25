@@ -20,6 +20,10 @@ proposed APIs and remaining acceptance gates.
   sampling provenance and implicit/explicit computation.
 - [Fields and representatives](guides/rips-representatives.md): select a prime
   field and request owned cycle/cocycle bases associated with intervals.
+- [Diagram-distance example](../examples/diagram_distances.rs): compare complete
+  diagrams with bottleneck, W1 or W2; run `cargo run --locked --example diagram_distances`.
+  The [matching specification](reference/mathematics.md#16-diagram-matching-distances)
+  defines the metrics, supported endpoints and context requirements.
 - [Runnable square example](../examples/square.rs): run
   `cargo run --locked --example square` from the repository root.
 - [API reference source](../src/lib.rs): build rustdoc with

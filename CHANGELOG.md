@@ -2,6 +2,9 @@
 
 ## 0.1.0 (unreleased)
 
+- Add native safe Rust bottleneck (L-infinity), W1 (L-infinity) and W2
+  (Euclidean) diagram distances, with complete-coverage and context validation,
+  essential multiplicity, independent matching tests and native comparison tools.
 - Initialize F2 H1 coboundaries in one pass with reusable safe buffers. Omit
   stored zero-lifetime apparent pairs and reconstruct their transformations when
   later columns need them. Avoid allocating discarded zero-lifetime H1 intervals.
@@ -104,4 +107,4 @@ Initial pure Rust implementation, with no runtime dependencies. Requires Rust 1.
   explicit timeout/omission records and private workload diagnostics for H1.
 
 H1 avoids constructing the full 2-skeleton; repeated enumeration and reduction
-fill-in still limit scalability. Diagram distances, other filtrations and Polars bindings are future work.
+fill-in still limit scalability. Other filtrations and Polars bindings are future work.

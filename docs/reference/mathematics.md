@@ -17,6 +17,8 @@ Reduced homology, non-prime coefficient rings, zigzag and multiparameter
 persistence are not implemented. Nonnegative scales and zero H0 births are Rips-specific; the general
 interval representation is not restricted to these dimensions or scales.
 
+Matching distances between complete diagrams are specified in section 16.
+
 | Symbol | Meaning |
 | --- | --- |
 | $n,d$ | Vertex count and ambient dimension |
@@ -601,3 +603,49 @@ expansion certified exhaustion. All public simplex/representative vertex labels
 refer to original input IDs, while the exposed graph uses a documented compact
 map. Representative bases describe this approximate filtration and do not claim
 a chain map into original Rips at the same scale.
+
+## 16. Diagram matching distances
+
+The `diagram_distances` domain compares one explicitly computed homology dimension
+of two complete diagrams. Points are a multiset: repetitions remain separate
+matching obligations. For finite points, allow partial bijections between the
+two multisets and match every unused point to the diagonal.
+
+| Operation | Ground cost between finite points | Diagonal cost | Objective |
+| --- | --- | --- | --- |
+| `bottleneck_distance` | L-infinity | `(death-birth)/2` | Minimum largest cost |
+| `wasserstein_1_infinity` | L-infinity | `(death-birth)/2` | Minimum sum of costs |
+| `wasserstein_2_euclidean` | Euclidean | `(death-birth)/sqrt(2)` | Square root of minimum sum of squared costs |
+
+Only `(finite birth, positive infinity)` essential points are representable.
+They match essential points in sorted birth order, with absolute birth difference
+as cost. Unequal counts give positive infinity. Combine finite and essential
+contributions by maximum, sum, or Euclidean norm for the three operations.
+Empty computed dimensions are valid; uncomputed dimensions are errors. Reject
+all `Coverage::Through` inputs, even if no current interval is censored: future
+births and deaths are unknown. A cutoff must not replace a death or certify
+essentiality. Diagonal points, non-finite births and other infinite endpoint
+categories remain excluded by the existing interval constructors.
+
+The `_results` functions additionally require equal coefficient characteristics.
+Every current computation context uses edge-length scales. Vertex counts,
+requested cutoffs and filtration kinds need not match when coverage is complete.
+Approximate constructions retain their provenance in the borrowed results;
+the returned scalar measures their actual diagrams without certifying a distance
+between the original datasets. Raw-diagram calls cannot establish provenance.
+
+Exactness excludes algorithmic approximation; it does not mean exact real
+arithmetic. Use binary64, deterministic tie handling and stable cost aggregation.
+W2 is recomputed from the chosen original cross/diagonal costs, rather than by
+subtracting two nearly equal total savings. Unrepresentable required arithmetic
+returns `NumericalFailure`, distinct from the mathematical infinity caused by
+unequal essential counts. Underflow must not silently erase a required nonzero
+cost. Scaling used by a solver must preserve representable input distinctions
+or fail explicitly.
+
+The native solvers are adapted from the MIT-licensed
+[Topp source](https://github.com/proffitteoy/Topp/tree/ffa1da051ca7ac5e313c74cc9fb92a2bcb20c234).
+Implementation-local license notices retain attribution. Their private routing
+and benchmark switches are not public API. Independent exhaustive partial
+matching, hand-derived cases and Topp/GUDHI comparisons validate the supported
+domain; source translation alone is not independent evidence.

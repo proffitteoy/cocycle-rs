@@ -141,6 +141,16 @@ pub enum Error {
         /// Largest dimension recorded as computed, including all lower ones.
         computed_max: usize,
     },
+    /// A full-diagram operation requires complete filtration coverage.
+    IncompleteDiagram {
+        /// Last scale through which the diagram is known.
+        through: f64,
+    },
+    /// Computation contexts do not describe compatible diagram coordinates.
+    IncompatibleDiagramContext {
+        /// Context constraint that was violated.
+        reason: &'static str,
+    },
 }
 
 impl fmt::Display for Error {
@@ -223,6 +233,15 @@ impl fmt::Display for Error {
                     f,
                     "dimension {requested} was not computed; maximum is {computed_max}"
                 )
+            }
+            Self::IncompleteDiagram { through } => {
+                write!(
+                    f,
+                    "full-diagram distance requires complete coverage; known through {through}"
+                )
+            }
+            Self::IncompatibleDiagramContext { reason } => {
+                write!(f, "incompatible diagram contexts: {reason}")
             }
         }
     }

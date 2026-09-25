@@ -20,10 +20,13 @@ protocols belong in the [benchmark guide](../../benches/README.md).
 | `tests/rips_resources.rs` | Budget/cancellation recovery across public paths, every-work-budget F2/H1 retry, and concurrent read-only F2/H1 and prime-field calls |
 | `tests/sparse_rips.rs` | Metric hypotheses, sampling provenance, blocker topology, original IDs, approximate coverage and computation parity |
 | `tests/descriptors.rs` | Formula, endpoint, exclusion, overflow, and empty-result behavior |
+| `tests/diagram_distances.rs` | Uninstrumented public distances, independent partial matching, essential multiplicity, coverage, context and numerical regressions |
+| `src/diagram_distances/bottleneck/tests.rs`, `src/diagram_distances/wasserstein/tests.rs` | Kernel oracles, adaptive routes, forced alternatives and diagnostic counters |
 | `src/persistence/reference/` | Independent explicit filtration and boundary reducer |
 | `src/filtration/flag/dense.rs` tests | Indexing, overflow, and independent cofacet enumeration |
 | `src/persistence/flag/cohomology/tests.rs` | Independent optimization combinations, transformation replay, duality, cancellation checkpoints and difficult numeric cases |
 | `tools/test_*.py` | Source/documentation checks, external comparison, and benchmark protocol behavior |
+| `tools/test_compare_distances.py`, `tools/test_benchmark_distances.py` | Distance transport, independent rational oracle, failure retention, profiling hooks and selection gates |
 
 The two ignored profiling tests are deliberately invoked only by developer tools.
 They do not represent missing ordinary regression coverage. Instrumented timings
@@ -122,6 +125,16 @@ correctness-only for those rows. The [historical tools](../../tools/legacy-bench
 retain the optional 512-case Ripser.py correctness check and wrapper benchmarks;
 their timings are not the native performance baseline.
 
+Diagram distances have a separate [native protocol](../../benches/distances/README.md).
+Independent partial-injection enumeration checks finite, diagonal and essential
+matching costs; public tests exercise the ordinary uninstrumented crate, while
+kernel tests exercise private counters and forced routes. The external suite
+uses pinned Topp, native GUDHI bottleneck with the merged matching fix, Hera at
+zero relative error, and isolated GUDHI/POT W1/W2 workers with explicit norms.
+It preserves f64 endpoint bits and records numerical stress disagreements without
+widening tolerances. Missing references, timeouts and POT nonconvergence remain
+failures or unavailable evidence, never successful comparisons.
+
 ## CI and evidence
 
 CI is configured to run source hygiene/Python syntax checks, all tool unit tests,
@@ -131,6 +144,12 @@ and external comparison smoke checks. Full performance runs are manual, with no
 machine-dependent speed gates. Actual hosted results are available in
 [GitHub Actions](https://github.com/huangbogeng/cocycle-rs/actions/workflows/ci.yml);
 check the exact commit rather than inferring success from the workflow definition.
+
+The diagram-distance CI job runs the quick supported comparison and a small
+resource smoke. Full supported acceptance uses `tools/compare_distances.py`
+without `--quick`, with the pinned native Topp/fixed-GUDHI and isolated weighted
+GUDHI/POT references. Record the exact tested SHA and retained summary; a quick
+CI pass does not establish that the full suite ran.
 
 Performance evidence is indexed by measured revision and associated PR under
 [benchmarks](../../benches/README.md); execution dates are metadata.

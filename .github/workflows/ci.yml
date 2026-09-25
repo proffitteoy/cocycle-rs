@@ -33,7 +33,7 @@ jobs:
       - run: python tools/check_docs.py
       - run: python -m unittest discover -s tools -p 'test_*.py'
       - run: cargo fmt --all -- --check
-      - run: rustfmt --edition 2024 --check tools/diagram_dump.rs tools/benchmark_driver.rs benches/native/cocycle.rs tools/reference/rips_cocycle.rs tools/reference/sparse_cocycle.rs benches/pipeline/cocycle.rs
+      - run: rustfmt --edition 2024 --check tools/diagram_dump.rs tools/benchmark_driver.rs benches/native/cocycle.rs tools/reference/rips_cocycle.rs tools/reference/sparse_cocycle.rs benches/pipeline/cocycle.rs benches/distances/cocycle.rs
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - run: cargo build --locked
       - run: rustdoc --edition 2024 --test README.md --extern cocycle=target/debug/libcocycle.rlib -L dependency=target/debug/deps
@@ -64,6 +64,7 @@ jobs:
       - run: cargo run --locked --example rips_sphere
       - run: cargo run --locked --example rips_representatives
       - run: cargo run --locked --example sparse_rips
+      - run: cargo run --locked --example diagram_distances
 
   msrv:
     name: Minimum Rust (1.91)
@@ -157,3 +158,48 @@ jobs:
             target/rips-pipeline-smoke/measurements.json
             target/rips-pipeline-smoke/fixtures/
             target/rips-pipeline-smoke/build/build.log
+
+  distances:
+    name: Native diagram-distance references
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: proffitteoy/Topp
+          ref: ffa1da051ca7ac5e313c74cc9fb92a2bcb20c234
+          path: target/native-sources/topp
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: GUDHI/gudhi-devel
+          ref: 4ec34ac55e6d2e8cfd7c322e84c1b0a56d516d51
+          path: target/native-sources/gudhi-distance
+      - run: sudo apt-get update && sudo apt-get install -y libcgal-dev libboost-dev
+      - run: python -m pip install gudhi==3.11.0 numpy==2.4.6 POT==0.9.6.post1
+      - run: python tools/compare_distances.py --quick --output target/distance-reference
+      - run: python tools/benchmark_distances.py --quick --samples 1 --groups baseline arena --families uniform sparse --sizes 8 32 --output target/distance-smoke
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: distance-reference-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            target/distance-reference/environment.json
+            target/distance-reference/results.json
+            target/distance-reference/summary.json
+            target/distance-reference/fixtures/
+            target/distance-reference/build/build.json
+            target/distance-reference/build/build.log
+            target/distance-smoke/environment.json
+            target/distance-smoke/results.json
+            target/distance-smoke/summary.json
+            target/distance-smoke/measurements.json
+            target/distance-smoke/fixtures/
+            target/distance-smoke/build/build.json
+            target/distance-smoke/build/build.log

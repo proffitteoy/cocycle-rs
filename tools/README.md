@@ -11,11 +11,29 @@ no Python TDA binding is imported into the measured computation. Source setup,
 commands and artifacts are documented in the [native guide](../benches/native/README.md),
 with execution rules in the [H0/H1 protocol](../benches/protocol.md). The separate
 [Rips pipeline suite](#rips-workflow-resources) measures broader public workflows.
-Both follow the shared [reporting rules](../benches/reporting.md).
+These suites and the [distance suite](#diagram-distance-correctness-and-ablations)
+follow the shared [reporting rules](../benches/reporting.md).
 
 [build_native.py](build_native.py) verifies pinned sources and compiles workers.
 [benchmark_inputs.py](benchmark_inputs.py) owns deterministic fixture generation,
 shared with historical controllers without sharing their Python worker path.
+
+## Diagram-distance correctness and ablations
+
+[compare_distances.py](compare_distances.py) checks bottleneck/L-infinity,
+W1/L-infinity and W2/Euclidean against independent rational small-diagram
+matching, pinned Topp, repaired native GUDHI bottleneck and isolated GUDHI/POT
+weighted workers. The default supported suite is full; `--quick` selects a
+smaller CI check, and `--suite stress` retains numerical reference disagreements.
+
+[benchmark_distances.py](benchmark_distances.py) compares native Rust/Topp
+single-pair calls and controlled memory/search variants on Linux.
+[distance_common.py](distance_common.py) owns their f64 transport, pins/builds,
+independent oracle and process protocol. The Rust worker compiles private
+instrumentation with `--cfg cocycle_distance_bench`; its public-library reference
+uses the separately built ordinary crate. No experiment feature is added to the
+public API. The [distance guide](../benches/distances/README.md) owns setup,
+commands, measurement boundaries, exclusions and artifact interpretation.
 
 ## Native Rips correctness checks
 

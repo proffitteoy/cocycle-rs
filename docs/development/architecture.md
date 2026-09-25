@@ -95,6 +95,14 @@ src/
     computation.rs               owned PersistenceResult and source context
     representative.rs            owned chain/cochain terms and local interval IDs
   descriptors/                   diagram-only lifetimes and Betti curves
+  diagram_distances/              complete-diagram bottleneck, W1 and W2 matching
+    bottleneck/                  geometric decisions, matching and capacity flow
+    wasserstein.rs               adaptive routing and component solves
+    wasserstein/numeric.rs       checked scaling and original-cost reconstruction
+    wasserstein/graph.rs         positive-saving candidates, storage and components
+    wasserstein/dense.rs         dense SAP and small matching certificates
+    wasserstein/sparse.rs        sparse primal-dual matching
+    wasserstein/direct.rs        original-cost numerical fallback
 ```
 
 Each domain has a documenting/exporting `mod.rs`; the tree lists the substantive
@@ -110,6 +118,7 @@ files. Public paths are re-exported from domains, not every private directory.
 | `persistence` | Algorithms, options, interval and representative assembly | Algebra, geometry, filtration, diagram, execution |
 | `diagram` | Algorithm-independent result ownership and validation | Algebra field identity, filtration provenance, error utilities |
 | `descriptors` | Read diagrams without recomputing persistence | Diagram, error utilities |
+| `diagram_distances` | Match complete diagrams with bottleneck/L-infinity, W1/L-infinity or W2/Euclidean costs | Diagram and context types, error utilities |
 
 Geometry and diagram code do not call persistence. Filtration code does not call
 persistence. Descriptors do not inspect source coordinates or algorithm state.
@@ -126,8 +135,16 @@ Here `geometry` includes nonmetric dissimilarities, `filtration` provides ordere
 topological access, and `persistence` computes persistent homology using that
 access. `diagram` is a mathematical result container, not plotting, and
 `descriptors` computes measurements from diagrams. Geometric distance operations
-belong to `geometry`; any future diagram-distance module needs a name that makes
-its different input domain explicit.
+belong to `geometry`; `diagram_distances` compares diagram multisets and does not
+recompute persistence or inspect the original point clouds.
+
+Distance counters and forced policies live in private `instrumentation.rs`
+modules, compiled under `cfg(test)` or the standalone worker's
+`cocycle_distance_bench` cfg. Ordinary library builds use empty private carriers
+and the selected adaptive policy. Counter statements and capacity traversals
+are removed by conditional compilation, including in debug builds. Binary-search
+ablation and the experimental arena layout are excluded from ordinary builds.
+The worker links the ordinary public crate for its separate `public` checks.
 
 ## Public workflow and ownership
 
