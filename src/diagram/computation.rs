@@ -1,47 +1,73 @@
 //! Owned mathematical context without borrowed inputs or reducer state.
-use super::PersistenceDiagram;
+use super::{PersistenceData, PersistenceDiagram, Representative};
 
 use crate::filtration::FiltrationKind;
 
-/// Owned context interpreting an ordinary persistence computation.
-///
-/// All currently supported paths use edge-length scales, zero vertex births,
-/// prime-field coefficients and exact reduction of the declared filtration.
-/// Approximate constructions additionally record their parameters and vertex mapping.
+/// Owned source context and ordinary persistence analysis settings.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ComputationContext {
-    pub(crate) approximation: Option<super::RipsApproximation>,
-    pub(crate) field: crate::algebra::PrimeField,
-    pub(crate) kind: FiltrationKind,
-    pub(crate) vertex_count: usize,
-    pub(crate) requested_cutoff: Option<f64>,
-    pub(crate) construction_cutoff: Option<f64>,
+    filtration: crate::filtration::FiltrationContext,
+    field: crate::algebra::PrimeField,
+    requested_cutoff: Option<f64>,
 }
 impl ComputationContext {
-    /// Sparse Rips provenance, or `None` for an exact construction.
+    /// Reusable source facts, including scale convention and construction metadata.
+    pub fn filtration(&self) -> &crate::filtration::FiltrationContext {
+        &self.filtration
+    }
+    /// Sparse Rips provenance, when applicable.
     pub fn approximation(&self) -> Option<&super::RipsApproximation> {
-        self.approximation.as_ref()
+        self.filtration.approximation()
     }
-    /// The mathematical object computed.
+    /// Compatibility classification of the mathematical source.
     pub fn filtration_kind(&self) -> FiltrationKind {
-        self.kind
+        self.filtration.filtration_kind()
     }
-    /// Number of vertices in the computed filtration, including isolated ones.
-    /// For sparse approximations the original count is the permutation length.
+    /// Source vertices, including vertices outside a smaller analysis cutoff.
     pub fn vertex_count(&self) -> usize {
-        self.vertex_count
+        self.filtration.vertex_count()
     }
-    /// Requested computation cutoff, before internal stopping optimizations.
+    /// Requested computation cutoff before internal stopping optimizations.
     pub fn requested_cutoff(&self) -> Option<f64> {
         self.requested_cutoff
     }
-    /// Source construction cutoff, if a threshold graph was constructed.
+    /// Requested construction cutoff in the source's declared units.
     pub fn construction_cutoff(&self) -> Option<f64> {
-        self.construction_cutoff
+        self.filtration.construction_cutoff()
     }
     /// Coefficient field characteristic.
     pub fn characteristic(&self) -> u32 {
         self.field.characteristic()
+    }
+    pub(crate) fn new(
+        field: crate::algebra::PrimeField,
+        kind: FiltrationKind,
+        vertex_count: usize,
+        requested_cutoff: Option<f64>,
+        construction_cutoff: Option<f64>,
+        approximation: Option<super::RipsApproximation>,
+    ) -> Self {
+        Self::from_filtration(
+            crate::filtration::FiltrationContext::new(
+                kind,
+                vertex_count,
+                construction_cutoff,
+                approximation,
+            ),
+            field,
+            requested_cutoff,
+        )
+    }
+    pub(crate) fn from_filtration(
+        filtration: crate::filtration::FiltrationContext,
+        field: crate::algebra::PrimeField,
+        requested_cutoff: Option<f64>,
+    ) -> Self {
+        Self {
+            filtration,
+            field,
+            requested_cutoff,
+        }
     }
 }
 
@@ -49,18 +75,27 @@ impl ComputationContext {
 /// Coverage and computed dimensions are recorded in the diagram, not duplicated.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PersistenceResult {
-    pub(crate) diagram: PersistenceDiagram,
-    pub(crate) context: ComputationContext,
-    pub(crate) representatives: Option<Vec<super::Representative>>,
+    data: PersistenceData,
+    representatives: Option<Vec<Representative>>,
 }
 impl PersistenceResult {
+    pub(crate) fn new(
+        diagram: PersistenceDiagram,
+        context: ComputationContext,
+        representatives: Option<Vec<Representative>>,
+    ) -> Self {
+        Self {
+            data: PersistenceData::new(diagram, context),
+            representatives,
+        }
+    }
     /// Borrow the diagram for existing descriptor operations.
     pub fn diagram(&self) -> &PersistenceDiagram {
-        &self.diagram
+        self.data.diagram()
     }
     /// Borrow the mathematical context.
     pub fn context(&self) -> &ComputationContext {
-        &self.context
+        self.data.context()
     }
     /// Requested representatives, or `None` when no requests were supplied.
     /// An empty slice means requests were made but no intervals were active.
@@ -69,6 +104,24 @@ impl PersistenceResult {
     }
     /// Consume the result, explicitly discarding context and representatives.
     pub fn into_diagram(self) -> PersistenceDiagram {
-        self.diagram
+        self.data.into_diagram()
+    }
+    /// Consume the result, retaining diagram/context and discarding representatives.
+    pub fn into_data(self) -> PersistenceData {
+        self.data
+    }
+    /// Move out common data and optional representatives without cloning or sorting.
+    /// Representative interval indices still address the returned data's diagram.
+    pub fn into_parts(self) -> (PersistenceData, Option<Vec<Representative>>) {
+        (self.data, self.representatives)
+    }
+    pub(crate) fn with_context(mut self, context: ComputationContext) -> Self {
+        self.data = self.data.with_context(context);
+        self
+    }
+}
+impl AsRef<PersistenceData> for PersistenceResult {
+    fn as_ref(&self) -> &PersistenceData {
+        &self.data
     }
 }

@@ -1,6 +1,6 @@
 ![Cocycle — topology, computed in Rust](assets/banner.svg)
 
-[![CI](https://github.com/huangbogeng/cocycle-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/huangbogeng/cocycle-rs/actions/workflows/ci.yml)
+[![CI](https://github.com/Aequiludium/cocycle-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Aequiludium/cocycle-rs/actions/workflows/ci.yml)
 [![Rust 1.91+](https://img.shields.io/badge/Rust-1.91%2B-102D32?style=flat-square)](Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-087D70?style=flat-square)](LICENSE)
 
@@ -13,12 +13,16 @@ dependencies and no unsafe code.
   with a specialized F₂ H₀/H₁ path. Euclidean points or borrowed matrix layouts.
 - **Inspectable construction** — exact threshold graphs, supplied weighted flag
   filtrations, and frozen simplicial complexes with boundary/cofacet queries.
+- **Supplied complexes** — validated simplicial storage and a small filtered-cell
+  trait for boundary reduction, including signed scales and unequal vertex births.
 - **Sparse approximation** — deterministic sampling, modified edges and higher-simplex
   blockers, with explicit metric hypotheses and approximation provenance.
 - **Optional representatives** — owned persistent cycle bases and query-scale dual
   cocycles, associated with intervals and original vertex IDs.
 - **Meaningful results** — owned diagrams preserve multiplicity and distinguish
-  finite deaths, essential classes, and right-censored intervals.
+  finite deaths, essential classes, and right-censored intervals. Explicit computed
+  dimension sets distinguish empty results from uncomputed dimensions; common
+  diagram/context data can be shared by specialized result types.
 - **Useful summaries** — finite lifetimes, persistence entropy in nats, and Betti
   curves, computed directly from a diagram.
 - **Diagram distances** — exact bottleneck (L-infinity), W1 (L-infinity) and
@@ -32,7 +36,7 @@ dependencies and no unsafe code.
 
 ```toml
 [dependencies]
-cocycle = { git = "https://github.com/huangbogeng/cocycle-rs", branch = "main" }
+cocycle = { git = "https://github.com/Aequiludium/cocycle-rs", branch = "main" }
 ```
 
 ```rust
@@ -58,9 +62,17 @@ for cutoffs, input layouts, and result semantics.
 
 ## Explore
 
-[Documentation](docs/README.md) · [Rips guide](docs/guides/rips.md) · [Graph construction](docs/guides/rips-construction.md) · [Mathematics](docs/reference/mathematics.md) ·
+[Documentation](docs/README.md) · [Filtered complexes](docs/guides/filtered-complexes.md) · [Rips guide](docs/guides/rips.md) · [Graph construction](docs/guides/rips-construction.md) · [Mathematics](docs/reference/mathematics.md) ·
 [Architecture](docs/development/architecture.md) · [Benchmarks](benches/README.md) ·
 [Rips comparison](benches/reports/rips-comparison.md) · [Contributing](CONTRIBUTING.md) · [Roadmap](docs/design/roadmap.md)
+
+Contributing an algorithm? Start with the [research-area navigation](docs/development/algorithm-contributions.md)
+and the [diagram-analysis](docs/development/diagram-analysis.md) or
+[complex-construction](docs/development/complex-construction.md) walkthrough.
+Run `cargo run --locked --example diagram_analysis` to analyze supplied intervals
+without constructing a complex.
+Run `cargo run --locked --example complex_construction` to construct a lower-star
+filtration, inspect its simplices and compute persistence using existing APIs.
 
 Build the API reference with `cargo doc --no-deps --open`, or run the example with
 `cargo run --locked --example square`. Dimension-generic prime-field persistence and
@@ -80,5 +92,5 @@ use native GUDHI and upstream Ripser C++; see the maintained
 [Rips comparison](benches/reports/rips-comparison.md) for tested scope, correctness
 and performance observations. Generated measurements and logs stay outside source Git.
 
-[Issue tracker](https://github.com/huangbogeng/cocycle-rs/issues) ·
+[Issue tracker](https://github.com/Aequiludium/cocycle-rs/issues) ·
 Code and original artwork are [MIT licensed](LICENSE).

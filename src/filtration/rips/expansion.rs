@@ -1,7 +1,7 @@
 //! Explicit Rips topology with retained construction provenance.
 use super::{RipsInputKind, ThresholdRips};
 use crate::Result;
-use crate::complex::FilteredSimplicialComplex;
+use crate::complex::SimplicialComplex;
 use crate::filtration::Coverage;
 
 /// A frozen exact Rips skeleton and the provenance needed to interpret it.
@@ -10,7 +10,7 @@ use crate::filtration::Coverage;
 /// from a scale truncation. It owns its topology and can outlive the input.
 #[derive(Clone, Debug)]
 pub struct RipsExpansion {
-    pub(crate) complex: FilteredSimplicialComplex,
+    pub(crate) complex: SimplicialComplex,
     pub(crate) max_simplex_dimension: usize,
     pub(crate) complete: bool,
     pub(crate) vertex_count: usize,
@@ -21,7 +21,7 @@ pub struct RipsExpansion {
 }
 impl RipsExpansion {
     /// Borrow the explicit filtered topology and its incidence queries.
-    pub fn complex(&self) -> &FilteredSimplicialComplex {
+    pub fn complex(&self) -> &SimplicialComplex {
         &self.complex
     }
     /// Requested construction dimension, distinct from a homology dimension.

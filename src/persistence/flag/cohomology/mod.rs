@@ -2,12 +2,9 @@
 //! Independently implemented from the invariants in docs/reference/mathematics.md section 9;
 //! the explicit boundary reducer remains an independent test oracle.
 
-pub(super) mod dimensions;
-
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
-use super::union_find::UnionFind;
 #[cfg(test)]
 use crate::filtration::flag::DenseFlag;
 use crate::filtration::flag::{FlagAccess, SimplexEntry};
@@ -16,6 +13,7 @@ use crate::filtration::rips::cone_radius;
 #[cfg(test)]
 use crate::geometry::DissimilarityView;
 use crate::persistence::execution::WorkBudget;
+use crate::persistence::union_find::UnionFind;
 use crate::{Error, Result};
 
 type RawIntervals = Vec<(usize, f64, Option<f64>)>;

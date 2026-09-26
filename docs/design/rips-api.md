@@ -11,8 +11,11 @@ types; removing old names/functions requires a separate declared breaking revisi
 
 The Rust blocks illustrate the implemented interface; the runnable guides and
 rustdoc provide complete checked examples. This document supersedes earlier
-entry-point sketches in the [Rips subsystem design](rips.md). Algorithm semantics
-and previously measured benchmark conclusions remain unchanged by this record.
+entry-point sketches in the [Rips subsystem design](rips.md). Rips mathematical
+semantics remain unchanged. Diagram-only explicit analysis retains the zero-born
+coface reducer when its value and cutoff conditions hold; general supplied
+filtrations use the public filtered-cell boundary contract. Existing timing
+reports describe their measured commits, not later integration revisions.
 The public analysis builder carries separate source and representative-request
 lifetimes (`PersistenceBuilder<'s, 'r, S>`), normally inferred at the call site.
 
@@ -82,7 +85,7 @@ let result = filtration
 `build_complex(2)` performs preparation and expansion through simplex dimension
 two under one budget. It returns `SimplicialFiltration`, owning explicit topology
 and its construction context. `complex()` borrows the existing
-`FilteredSimplicialComplex`, with lookup, filtration-ordered traversal, oriented
+`SimplicialComplex`, with lookup, filtration-ordered traversal, oriented
 boundary and stored codimension-one cofaces. Lookup uses strictly increasing
 vertex IDs, as today. It is not a mutable simplex tree or a claim of full GUDHI
 container parity. No topology is cloned for inspection.
@@ -113,6 +116,11 @@ is imposed merely to unify the interface. Representative requests keep their
 separate documented materialization costs; direct computation is not a promise
 that no internal simplices are ever stored.
 
+Direct exact point analysis retains graph edges through the smaller of the
+construction and analysis caps. It still validates all pair distances and records
+the caller's construction cap independently of this temporary retention bound.
+Reusable `prepare()` continues to retain the full requested construction range.
+
 Both workflows compute the same mathematical source at equal field and range.
 They must agree on interval multisets and coverage when the explicit construction
 is sufficient. Representation metadata and work performed can differ.
@@ -135,9 +143,10 @@ requiring users to construct every type explicitly.
 | `FlagFiltration` | `filtration` | Existing supplied-graph source with permanently absent missing edges |
 | `Execution<'c>` | `execution` | Optional immutable work/cancellation settings; counters remain private |
 
-`FilteredSimplicialComplex` and `WeightedGraph` remain storage types. A bare complex
+`SimplicialComplex` and `WeightedGraph` remain storage types. A bare complex
 is not proof of original Rips completeness and is not accepted as an exact-Rips
-analysis source. `SimplicialFiltration` adds that mathematical context without
+analysis source. Its own `.persistence()` analyzes only the supplied topology;
+see [filtered complexes](../guides/filtered-complexes.md). `SimplicialFiltration` adds that mathematical context without
 copying the stored topology. Its constructors remain controlled by construction;
 callers cannot manufacture coverage or exhaustion certificates.
 
@@ -274,10 +283,12 @@ behind a supposedly reusable request.
 
 ## Architecture and extension boundaries
 
-Keep `geometry/complex -> filtration -> persistence -> result assembly` as data
-flow, with consumers depending on their inputs. `execution` lives below construction
-and computation and imports neither. Filtration implementation files do not import
-persistence. Construction never performs reduction.
+Keep `geometry/complex -> filtration -> persistence -> result assembly` as the
+responsibility map for these Rips workflows, with consumers depending on their
+inputs. It does not require every algorithm to materialize those stages: a direct
+persistence algorithm may fuse preparation and reduction. `execution` lives below
+construction and computation and imports neither. Filtration implementation files
+do not import persistence; explicit construction terminals do not perform reduction.
 
 `PersistenceExt` lives in `persistence` and is implemented for supported library
 sources. Its sized-source method returns `PersistenceBuilder<'_, 'static, Self>` before representative requests. It borrows
@@ -305,8 +316,20 @@ Existing import paths and getters preserve their information. The legacy
 its public axes is deferred to the breaking revision.
 
 A new filtration family supplies its own construction and source adapter when
-needed; it is not forced through Rips clique enumeration. A new input layout or
-output request must not create another public persistence function family.
+needed; it is not forced through Rips clique enumeration. Avoid duplicating public
+function families merely for another layout or optional output under the same
+mathematical contract. A specialized algorithm with different preconditions,
+parameters or result semantics may have a focused entry point independently of
+default Builder dispatch. The [kernel design](kernel.md#algorithm-implementations-and-default-integration)
+owns that contribution policy and the implemented result contracts.
+Common `PersistenceData`, explicit computed-dimension sets and internal
+[source-context assembly](kernel.md#source-facts-and-result-assembly) are implemented
+locally. The [result API migration](kernel.md#result-api-migration) describes their
+pre-release semantic and signature changes; legacy Rips entry points remain available.
+The [extension boundaries](kernel.md#extension-boundaries) distinguish current
+static cell adaptation and in-crate contributions from future external result
+import and runtime plugins. This page describes the current Builder workflow
+and compatibility stage.
 Read-only explicit topology remains the current scope. Dynamic editing, new
 filtration families, collapse operations and language bindings are separate work.
 

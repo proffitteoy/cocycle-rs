@@ -7,11 +7,17 @@ approximation includes blocker-aware computation and explicit metric hypotheses.
 Owned results preserve coverage, field and approximation context; cycle and
 cocycle bases are available on request at specified scales. Descriptors derive
 lifetime statistics and Betti curves from diagrams.
+
+Supplied simplicial and filtered-cell complexes support boundary reduction with
+signed scales and unequal vertex births. Contributor walkthroughs cover diagram
+analysis and explicit simplicial construction.
 Start with a task below; design pages distinguish implemented decisions from
 proposed APIs and remaining acceptance gates.
 
 ## Use the library
 
+- [Supplied filtered complexes](guides/filtered-complexes.md): validated simplicial
+  storage, the filtered-cell contract, signed scales and generic boundary reduction.
 - [Rips guide](guides/rips.md): choose an input, compute persistence, interpret
   coverage and endpoints, and derive measurements.
 - [Rips construction guide](guides/rips-construction.md): matrix layouts, custom
@@ -33,6 +39,11 @@ proposed APIs and remaining acceptance gates.
 
 | Question | Read |
 | --- | --- |
+| How do I contribute an algorithm in my research area? | [Algorithm contribution paths](development/algorithm-contributions.md) |
+| How do I implement and test a diagram descriptor? | [Diagram analysis walkthrough](development/diagram-analysis.md) |
+| How do I contribute diagram matching? | [Distance contribution path](development/diagram-analysis.md#contribute-diagram-distances) |
+| How do I construct and validate explicit simplicial filtrations? | [Complex construction walkthrough](development/complex-construction.md) |
+| How do I implement a persistence or reduction algorithm? | [Persistence algorithm walkthrough](development/persistence-reduction.md) |
 | What mathematical and numerical guarantees apply? | [Mathematical specification](reference/mathematics.md) |
 | Which papers justify the definitions and algorithms? | [Bibliography](reference/bibliography.md) |
 | Where does code belong and how do the parts interact? | [Current architecture](development/architecture.md) |
@@ -40,8 +51,9 @@ proposed APIs and remaining acceptance gates.
 | How do we check correctness independently? | [Testing and validation](development/testing.md) |
 | Which commands, review rules, and release checks apply? | [Contributing](../CONTRIBUTING.md) |
 
-For implementation work, read architecture, the relevant mathematical section,
-and its validation obligations together. The specification keeps shared notation
+For algorithm work, start with the contribution path and relevant mathematical
+section. Maintainers use the architecture and validation obligations for kernel
+integration. The specification keeps shared notation
 and numbered derivations in one place; rustdoc owns individual API contracts.
 
 ## Plan and compare
@@ -53,7 +65,7 @@ and numbered derivations in one place; rustdoc owns individual API contracts.
 | [Complete Rips subsystem](design/rips.md) | Rips target, original GUDHI/Ripser comparison, API sketches and current acceptance matrix; use guides/rustdoc for callable APIs |
 | [Rips acceptance audit](design/rips-acceptance.md) | R1-R10 evidence, resource boundaries and local/hosted validation distinction |
 | [Rips implementation scope](design/rips-implementation.md) | Stage-specific new directories, source moves, code/tooling changes and review units |
-| [Kernel design](design/kernel.md) | Design rationale, extension boundaries, and proposed capability gates |
+| [Kernel design](design/kernel.md) | Implemented adapter, result and algorithm-boundary revisions; ownership, conversion costs, extension policy, API migration and primary design references |
 | [GUDHI C++ study](research/gudhi-cpp.md) | Pinned upstream source map and reading plan; excludes Python wrappers |
 | [Benchmarks](../benches/README.md) | Suite-specific protocols and maintained comparisons with measured revisions and evidence status |
 | [Rips comparison](../benches/reports/rips-comparison.md) | Measured native correctness and performance; updated in place on reruns |

@@ -2,7 +2,7 @@
 mod access;
 mod cliques;
 mod expansion;
-pub(crate) use cliques::{CliqueAccess, ExplicitAccess, SimplicialAccess, next_dimension};
+pub(crate) use cliques::CliqueAccess;
 pub(crate) use expansion::{expand, expand_access, expand_access_with};
 mod dense;
 mod index;
@@ -47,7 +47,7 @@ impl FlagFiltration {
     pub fn expand(
         &self,
         max_simplex_dimension: usize,
-    ) -> crate::Result<crate::complex::FilteredSimplicialComplex> {
+    ) -> crate::Result<crate::complex::SimplicialComplex> {
         Ok(expand(self.graph(), max_simplex_dimension)?.0)
     }
 }

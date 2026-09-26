@@ -16,6 +16,8 @@ limited to F2 H0/H1. Optional cycle and cocycle bases are described in section 1
 Reduced homology, non-prime coefficient rings, zigzag and multiparameter
 persistence are not implemented. Nonnegative scales and zero H0 births are Rips-specific; the general
 interval representation is not restricted to these dimensions or scales.
+Supplied `SimplicialComplex` and `FilteredComplex` analysis also supports signed
+filtrations and unequal vertex births; see [the guide](../guides/filtered-complexes.md).
 
 Matching distances between complete diagrams are specified in section 16.
 
@@ -66,7 +68,7 @@ A simplex is a nonempty finite vertex set, with dimension $|\sigma|-1$. A
 simplicial complex is closed under nonempty faces. A filtration satisfies
 $\tau\subseteq\sigma\Rightarrow f(\tau)\le f(\sigma)$.
 
-Cocycle uses edge-length scales:
+Rips and supplied flag filtrations use edge-length scales:
 
 $$
 f(\{i\})=0,\qquad
@@ -190,6 +192,13 @@ In incomplete coverage, all surviving births, including H0, are conservatively
 right-censored. The result retains computed dimensions and coverage. A single
 optional death value cannot express these distinctions.
 
+Computed dimensions form a nonempty declared set, independently of which interval
+lists are nonempty. An omitted dimension is unknown, not a claim of zero homology.
+`PersistenceDiagram::new(q, ...)` and current builders declare all dimensions
+from zero through q; `with_dimensions` also represents noncontiguous domains.
+Dimension-specific analysis requires membership in that set. The greatest
+computed dimension does not establish membership of smaller dimensions.
+
 One could extend the truncated filtration constantly and write infinite intervals
 for its survivors. Censoring instead describes uncertainty about the original
 full filtration. Surviving through T is not dying at T.
@@ -234,7 +243,7 @@ $$\beta_k(t)=\#\{[b,d)\in\mathcal D_k:b\le t<d\}.$$
 
 Essential intervals count for $t\ge b$. Censored intervals count throughout the
 known range $b\le t\le T$; truncated diagrams reject queries beyond T. Caller-supplied
-grid values must be finite, nonnegative, and strictly increasing. Omitting
+grid values must be finite and strictly increasing; negative values are valid. Omitting
 zero-length pairs does not change Betti numbers at any scale.
 
 ## 8. Stability assumptions
@@ -465,8 +474,13 @@ extension of the reversed-transpose duality in section 9 and [B21](bibliography.
 
 Only the current dimension, transformations, pivot ownership and a working
 coboundary are needed on the implicit path. These can still be exponentially
-large. The explicit path uses the same reducer over stored incidence and thus
-also pays for the already materialized skeleton. H0/H1-only implicit requests
+large. Legacy explicit Rips entry points adapt stored incidence to this reducer.
+Diagram-only explicit simplicial analysis also uses it when all vertices are
+born at zero and the query cutoff is nonnegative (or absent). Stored cofaces,
+not graph reconstruction, preserve non-flag topology and delayed simplex values.
+Other explicit inputs use the filtered-cell boundary reduction in section 17.
+Both explicit paths also pay
+for the already materialized skeleton. H0/H1-only implicit requests
 retain the specialized compact-index engine and its pair shortcuts.
 
 As an independent high-dimensional fixture, partition 2r vertices into r pairs.
@@ -627,9 +641,18 @@ births and deaths are unknown. A cutoff must not replace a death or certify
 essentiality. Diagonal points, non-finite births and other infinite endpoint
 categories remain excluded by the existing interval constructors.
 
-The `_results` functions additionally require equal coefficient characteristics.
-Every current computation context uses edge-length scales. Vertex counts,
-requested cutoffs and filtration kinds need not match when coverage is complete.
+The `_results` functions additionally require equal coefficient characteristics
+and declared edge-length scales on both inputs. An unspecified scale is rejected,
+even when both sources have unspecified scales; matching enum values do not
+establish comparable units. Supplied-complex users can explicitly pass raw diagrams
+after establishing their common scale. Even declared edge lengths do not certify
+physical units or normalization across datasets; callers must establish them
+for both raw-diagram and result-based calls. In sparse Rips, the modified edge
+value `2 * (d - lambda / epsilon)` still has edge-length units, but changes the
+filtration. Comparing its diagram with exact Rips is a distance between the two
+actual diagrams, not a distance between their input metrics or an approximation
+error certificate. Vertex counts, requested cutoffs
+and filtration kinds need not match when coverage is complete.
 Approximate constructions retain their provenance in the borrowed results;
 the returned scalar measures their actual diagrams without certifying a distance
 between the original datasets. Raw-diagram calls cannot establish provenance.
@@ -649,3 +672,41 @@ Implementation-local license notices retain attribution. Their private routing
 and benchmark switches are not public API. Independent exhaustive partial
 matching, hand-derived cases and Topp/GUDHI comparisons validate the supported
 domain; source translation alone is not independent evidence.
+
+## 17. Supplied filtered-cell boundary contract
+
+For ordered cells c_i, let D[j,i] be the integer incidence coefficient of c_j in
+the boundary of c_i. Nonzero entries require j < i, dimension(c_j) =
+dimension(c_i)-1 and f(c_j) <= f(c_i). The mathematical source must satisfy D^2=0
+over the integers. Reduction maps coefficients to the selected prime field and
+checks this chain identity on the retained q+1 skeleton in that field. This
+field-specific check does not prove integer validity of a custom adapter.
+
+Unpaired zero reduced columns represent essential classes of the supplied complex,
+or censored classes when an analysis cutoff truncates its filtration. Vertex birth
+values are read from the source. Maximum edge value is not used to bound general
+filtrations: an Alpha triangle can enter after all its edges. Certified Rips
+expansions additionally preserve original scale coverage and skeleton sufficiency;
+a bare supplied complex does not assert that relationship to a larger source.
+
+## 18. Lower-star construction example
+
+For a finite simplicial complex K and a finite scalar function g on its vertices,
+define f(sigma) = max {g(v) : v in sigma} for every nonempty simplex. If tau is
+a face of sigma, its vertex set is a subset, so f(tau) <= f(sigma). Thus sublevel
+sets are face-closed. This lower-star filtration permits negative and tied values;
+its units are those of g, not necessarily distance or squared distance.
+
+The [contributor example](../../examples/complex_construction.rs) supplies all
+vertices and all nonvertex simplices explicitly. It validates rather than infers
+missing nonvertex faces. Its vertex labels are the indices of g, and shared
+simplices must occur only once. This is a filtration assignment on given topology,
+not a geometric triangulation algorithm or a public production constructor.
+
+For the four-cycle with edges 01, 12, 23, 03 and vertex values (-2, 1, -1, 0),
+two components are born at -2 and -1. They merge at 0 through vertex 3. At 1,
+vertex 1 and its two edges close the loop. Omitting zero-lifetime pairs gives
+H0 intervals [-2, infinity), [-1, 0) and H1 interval [1, infinity) over every
+prime field. At cutoff -0.5 both components are right-censored. A filled triangle
+with every vertex value 2 enters with all faces at 2 and has only the essential
+H0 interval [2, infinity); it has no positive-lifetime H1 interval.

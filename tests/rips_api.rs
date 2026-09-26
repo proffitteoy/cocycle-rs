@@ -97,6 +97,124 @@ fn matrix_layouts_and_points_agree_without_losing_construction_caps() -> Result<
     assert_eq!(analysis_only.context().requested_cutoff(), Some(1.));
     Ok(())
 }
+
+#[test]
+fn independent_point_caps_preserve_source_coverage_and_representatives() -> Result<()> {
+    let coordinates = [0., 1., 2., 3.];
+    let points = PointCloudView::new(&coordinates, 4, 1)?;
+    let distances = matrix(&[1., 2., 1., 3., 2., 1.], 4);
+    for construction in [None, Some(0.5), Some(1.), Some(3.), Some(4.)] {
+        let mut rips = RipsBuilder::from_points(points);
+        let mut dense = RipsBuilder::from_distance_matrix(distances);
+        if let Some(cap) = construction {
+            rips = rips.max_edge_length(cap);
+            dense = dense.max_edge_length(cap);
+        }
+        let prepared = rips.prepare()?;
+        let expanded = rips.build_complex(2)?;
+        for analysis in [None, Some(0.), Some(0.5), Some(1.5), Some(3.), Some(5.)] {
+            for prime in [2, 3, 65537] {
+                let field = PrimeField::new(prime)?;
+                let scale = analysis.or(construction).unwrap_or(5.);
+                let requests = [RepresentativeRequest::new(
+                    0,
+                    scale,
+                    RepresentativeSelection::Both,
+                )?];
+                for representatives in [&[][..], &requests[..]] {
+                    let mut direct = rips
+                        .persistence()
+                        .field(field)
+                        .representatives(representatives);
+                    let mut stored = prepared
+                        .persistence()
+                        .field(field)
+                        .representatives(representatives);
+                    let mut explicit = expanded
+                        .persistence()
+                        .field(field)
+                        .representatives(representatives);
+                    let mut matrix = dense
+                        .persistence()
+                        .field(field)
+                        .representatives(representatives);
+                    if let Some(cap) = analysis {
+                        direct = direct.max_filtration_value(cap);
+                        stored = stored.max_filtration_value(cap);
+                        explicit = explicit.max_filtration_value(cap);
+                        matrix = matrix.max_filtration_value(cap);
+                    }
+                    let results = [
+                        direct.compute(),
+                        stored.compute(),
+                        explicit.compute(),
+                        matrix.compute(),
+                    ];
+                    if construction.is_some_and(|cap| cap < 3. && analysis.is_some_and(|t| t > cap))
+                    {
+                        for result in results {
+                            assert!(matches!(result, Err(Error::IncompleteFiltration { .. })));
+                        }
+                        continue;
+                    }
+                    let [direct, stored, explicit, matrix] = results;
+                    let direct = direct?;
+                    for other in [stored?, explicit?, matrix?] {
+                        assert_eq!(direct.diagram(), other.diagram());
+                        assert_eq!(
+                            direct.context().construction_cutoff(),
+                            other.context().construction_cutoff()
+                        );
+                        assert_eq!(
+                            direct.context().requested_cutoff(),
+                            other.context().requested_cutoff()
+                        );
+                        assert_eq!(
+                            direct.representatives().map(<[_]>::len),
+                            other.representatives().map(<[_]>::len)
+                        );
+                    }
+                    assert_eq!(direct.context().construction_cutoff(), construction);
+                    assert_eq!(direct.context().requested_cutoff(), analysis);
+                    let effective = match (construction, analysis) {
+                        (Some(a), Some(b)) => Some(a.min(b)),
+                        (a, b) => a.or(b),
+                    };
+                    assert_eq!(
+                        direct.diagram().coverage(),
+                        match effective {
+                            Some(t) if t < 3. => Coverage::Through(t),
+                            _ => Coverage::Complete,
+                        }
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn direct_point_analysis_does_not_process_edges_above_its_cutoff() -> Result<()> {
+    let coordinates: Vec<_> = (0..32).map(f64::from).collect();
+    let rips =
+        RipsBuilder::from_points(PointCloudView::new(&coordinates, 32, 1)?).max_edge_length(100.);
+    // Enough for every pair's distance checks and an edgeless H0 computation,
+    // but not another pass over all 496 edges allowed by the construction cap.
+    let execution = cocycle::execution::Execution::default().max_work(1200);
+    for prime in [2, 3, 65537] {
+        let result = rips
+            .persistence()
+            .max_homology_dimension(0)
+            .max_filtration_value(0.5)
+            .field(PrimeField::new(prime)?)
+            .compute_with(&execution)?;
+        assert_eq!(result.diagram().intervals().len(), 32);
+        assert_eq!(result.diagram().coverage(), Coverage::Through(0.5));
+        assert_eq!(result.context().construction_cutoff(), Some(100.));
+    }
+    Ok(())
+}
 #[test]
 fn scale_and_dimension_truncation_are_independent() -> Result<()> {
     let values: Vec<_> = (0..6)
@@ -358,5 +476,27 @@ fn representative_scales_follow_certified_coverage_not_the_requested_cap() -> Re
             .compute(),
         Err(Error::QueryOutsideCoverage { .. })
     ));
+    Ok(())
+}
+
+#[test]
+fn expanded_negative_cutoff_does_not_create_zero_born_components() -> Result<()> {
+    let values = [1.];
+    let expanded = RipsBuilder::from_distance_matrix(matrix(&values, 2)).build_complex(1)?;
+    let requests = [RepresentativeRequest::new(
+        0,
+        -1.,
+        RepresentativeSelection::Both,
+    )?];
+    let early = expanded.persistence().max_filtration_value(-1.).compute()?;
+    assert!(early.diagram().intervals().is_empty());
+    assert_eq!(early.diagram().coverage(), Coverage::Through(-1.));
+    let bases = expanded
+        .persistence()
+        .max_filtration_value(-1.)
+        .representatives(&requests)
+        .compute()?;
+    assert_eq!(early.diagram(), bases.diagram());
+    assert!(bases.representatives().unwrap().is_empty());
     Ok(())
 }

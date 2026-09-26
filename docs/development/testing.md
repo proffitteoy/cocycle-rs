@@ -6,6 +6,19 @@ Tests protect mathematical and public API contracts. Run commands and review
 requirements are in [CONTRIBUTING.md](../../CONTRIBUTING.md#verification); measurement
 protocols belong in the [benchmark guide](../../benches/README.md).
 
+Algorithm authors can start with the
+[focused domain checks](../../CONTRIBUTING.md#focused-algorithm-checks).
+The [contributor tutorial](diagram-analysis.md) uses manually supplied intervals;
+the example and descriptor tests do not need a complex constructor or a persistence
+calculation. Maintainer/CI checks retain the broader integration coverage below.
+The [construction tutorial](complex-construction.md) validates explicit topology
+before composing it with persistence. The distance path adds public context checks
+and private matching oracles. The [reduction tutorial](persistence-reduction.md)
+starts from hand-derived boundary columns, checks transformations independently
+and then exercises source/field/representative integration. The CI quality job exercises all four focused
+commands; platform jobs run their examples and explicitly execute the construction
+example's colocated tests in debug/release. MSRV also runs those example tests.
+
 ## Test layers
 
 | Location | Purpose |
@@ -19,13 +32,16 @@ protocols belong in the [benchmark guide](../../benches/README.md).
 | `tests/prime_fields.rs` | Full-u32 modular arithmetic, field-sensitive flag RP2, independent ranks, cycle/cocycle closure, nontriviality, duality and interval identity |
 | `tests/rips_resources.rs` | Budget/cancellation recovery across public paths, every-work-budget F2/H1 retry, and concurrent read-only F2/H1 and prime-field calls |
 | `tests/sparse_rips.rs` | Metric hypotheses, sampling provenance, blocker topology, original IDs, approximate coverage and computation parity |
-| `tests/descriptors.rs` | Formula, endpoint, exclusion, overflow, and empty-result behavior |
-| `tests/diagram_distances.rs` | Uninstrumented public distances, independent partial matching, essential multiplicity, coverage, context and numerical regressions |
+| `tests/descriptors.rs` | Formula, endpoint, exclusion, overflow, empty-result behavior and translation/rescaling properties |
+| `tests/filtered_complex.rs` | Supplied simplicial/cell inputs, signed scales, unequal vertex births, oriented boundaries, source coverage and invalid contracts |
+| `examples/complex_construction.rs` tests | Lower-star construction, analytic circle persistence, triangle incidence, ties, isolates and invalid topology; run with `--example complex_construction` |
+| `tests/diagram_distances.rs` | Uninstrumented public distances, independent partial matching, essential multiplicity, coverage, field/scale context, supplied versus certified sources and numerical regressions |
 | `src/diagram_distances/bottleneck/tests.rs`, `src/diagram_distances/wasserstein/tests.rs` | Kernel oracles, adaptive routes, forced alternatives and diagnostic counters |
 | `src/persistence/reference/` | Independent explicit filtration and boundary reducer |
 | `src/filtration/flag/dense.rs` tests | Indexing, overflow, and independent cofacet enumeration |
 | `src/persistence/flag/cohomology/tests.rs` | Independent optimization combinations, transformation replay, duality, cancellation checkpoints and difficult numeric cases |
 | `tools/test_*.py` | Source/documentation checks, external comparison, and benchmark protocol behavior |
+| `docs/development/diagram-analysis.md` | Executable contributor example: finite counts, multiplicity, endpoint exclusions and computed dimensions |
 | `tools/test_compare_distances.py`, `tools/test_benchmark_distances.py` | Distance transport, independent rational oracle, failure retention, profiling hooks and selection gates |
 
 The two ignored profiling tests are deliberately invoked only by developer tools.
@@ -142,7 +158,7 @@ formatting, Clippy, rustdoc, local documentation checks,
 debug/release tests on Linux/macOS/Windows, Rust 1.91 tests/checks, package validation,
 and external comparison smoke checks. Full performance runs are manual, with no
 machine-dependent speed gates. Actual hosted results are available in
-[GitHub Actions](https://github.com/huangbogeng/cocycle-rs/actions/workflows/ci.yml);
+[GitHub Actions](https://github.com/Aequiludium/cocycle-rs/actions/workflows/ci.yml);
 check the exact commit rather than inferring success from the workflow definition.
 
 The diagram-distance CI job runs the quick supported comparison and a small

@@ -1,6 +1,5 @@
 //! Explicit requests for basis representatives at specified scales.
 use crate::Result;
-use crate::geometry::distance::nonnegative;
 
 /// Which basis payloads to retain for each active interval at a query scale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,11 +26,11 @@ impl RepresentativeRequest {
     /// Validate a representative query; field and coverage come from the computation.
     ///
     /// # Errors
-    /// Rejects non-finite or negative scales. Dimension/coverage are checked at computation.
+    /// Rejects non-finite scales; signed filtration values are supported. Dimension/coverage are checked at computation.
     pub fn new(dimension: usize, scale: f64, selection: RepresentativeSelection) -> Result<Self> {
         Ok(Self {
             dimension,
-            scale: nonnegative(scale, "representative scale", None)?,
+            scale: crate::persistence::options::finite_scale(scale)?,
             selection,
         })
     }

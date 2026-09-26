@@ -14,7 +14,8 @@ type Compute<S> = fn(
 
 /// Configure ordinary persistence for a borrowed supported mathematical source.
 ///
-/// Obtain this request through [`super::PersistenceExt::persistence`]. Setters are
+/// Obtain this request through [`super::PersistenceExt::persistence`] or
+/// [`Self::from_complex`] for a custom filtered-cell implementation. Setters are
 /// last-call-wins; only `compute` executes. Source and representative requests
 /// remain borrowed until execution finishes; the result owns its data.
 /// Default coefficients are F2, the largest homology dimension is one, and the
@@ -26,6 +27,7 @@ pub struct PersistenceBuilder<'s, 'r, S> {
     cutoff: Option<f64>,
     field: PrimeField,
     requests: &'r [RepresentativeRequest],
+    signed_scale: bool,
 }
 impl<'s, S> PersistenceBuilder<'s, 'static, S> {
     pub(super) fn new(source: &'s S, compute: Compute<S>) -> Self {
@@ -36,7 +38,24 @@ impl<'s, S> PersistenceBuilder<'s, 'static, S> {
             cutoff: None,
             field: PrimeField::default(),
             requests: &[],
+            signed_scale: false,
         }
+    }
+}
+impl<'s, S: crate::complex::FilteredComplex> PersistenceBuilder<'s, 'static, S> {
+    /// Analyze a supplied complex through its filtered-cell contract.
+    /// The supplied object is the entire mathematical source; no original-source
+    /// truncation certificate is inferred. This generic path returns diagrams;
+    /// vertex-labelled representatives require a concrete simplicial source.
+    pub fn from_complex(source: &'s S) -> Self {
+        Self::new_filtered(source, super::filtered::compute::<S>)
+    }
+}
+impl<'s, S> PersistenceBuilder<'s, 'static, S> {
+    pub(super) fn new_filtered(source: &'s S, compute: Compute<S>) -> Self {
+        let mut result = Self::new(source, compute);
+        result.signed_scale = true;
+        result
     }
 }
 impl<'s, S> PersistenceBuilder<'s, '_, S> {
@@ -72,11 +91,13 @@ impl<'s, S> PersistenceBuilder<'s, '_, S> {
             cutoff: self.cutoff,
             field: self.field,
             requests,
+            signed_scale: self.signed_scale,
         }
     }
     /// Execute with unlimited cooperative work and no cancellation flag.
     /// # Errors
-    /// Rejects invalid parameters, insufficient source dimensions/range, numerical
+    /// Rejects invalid parameters, invalid supplied complexes, unsupported representative
+    /// requests on generic cell sources, insufficient source dimensions/range, numerical
     /// failures, checked size/allocation errors and unsatisfied representative requests.
     pub fn compute(self) -> Result<PersistenceResult> {
         self.compute_with(&Execution::default())
@@ -85,7 +106,12 @@ impl<'s, S> PersistenceBuilder<'s, '_, S> {
     /// # Errors
     /// Includes [`Self::compute`] errors, cancellation and work exhaustion.
     pub fn compute_with(self, execution: &Execution<'_>) -> Result<PersistenceResult> {
-        let options = PersistenceOptions::new(self.dimension, self.cutoff)?.with_field(self.field);
+        let options = if self.signed_scale {
+            PersistenceOptions::for_filtration(self.dimension, self.cutoff)
+        } else {
+            PersistenceOptions::new(self.dimension, self.cutoff)
+        }?
+        .with_field(self.field);
         for request in self.requests {
             if request.dimension() > self.dimension {
                 return Err(Error::DimensionNotComputed {

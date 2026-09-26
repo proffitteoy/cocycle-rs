@@ -3,15 +3,14 @@
 use crate::diagram::{Coverage, IntervalEnd, PersistenceDiagram};
 use crate::{Error, Result};
 
-/// Count live intervals at the given finite, nonnegative, strictly increasing scales.
+/// Count live intervals at the given finite, strictly increasing scales.
 ///
 /// Births are included and finite deaths excluded. A censored class remains alive
 /// at the cutoff itself. Complete diagrams may be queried beyond the largest
 /// observed endpoint. An empty grid yields an empty vector after dimension checks.
 ///
 /// Sorts birth/death events, then scans the grid in O(m log m + g) time and O(m + g)
-/// space for m selected intervals and g query values. The first version's grid
-/// contract is nonnegative, including for manually constructed signed-scale diagrams.
+/// space for m selected intervals and g query values. Signed scales are supported.
 ///
 /// # Errors
 /// Returns an error for an uncomputed dimension, an invalid grid, a query past
@@ -23,10 +22,10 @@ pub fn betti_curve(
 ) -> Result<Vec<usize>> {
     let intervals = diagram.intervals_in_dimension(dimension)?;
     for (index, &value) in grid.iter().enumerate() {
-        if !value.is_finite() || value < 0.0 {
+        if !value.is_finite() {
             return Err(Error::InvalidGrid {
                 index,
-                reason: "scale must be finite and nonnegative",
+                reason: "scale must be finite",
             });
         }
         if index > 0 && value <= grid[index - 1] {

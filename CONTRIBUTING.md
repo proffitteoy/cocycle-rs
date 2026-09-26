@@ -13,9 +13,11 @@ and Ripser sources; see the [native setup](benches/native/README.md). Diagram-di
 comparisons additionally require a C++20 Topp adapter, CGAL headers and pinned
 Python GUDHI/NumPy/POT packages; see the [distance setup](benches/distances/README.md#prepare-the-reference-environment).
 Other Python TDA wrappers remain [optional checks](tools/legacy-benchmarks.md).
-Start with `cargo test --locked` and the [architecture](docs/development/architecture.md).
+Algorithm authors can start with the [contribution paths](docs/development/algorithm-contributions.md)
+and the focused commands below. For wider kernel work, start with
+`cargo test --locked` and the [architecture](docs/development/architecture.md).
 
-Use the [issue tracker](https://github.com/huangbogeng/cocycle-rs/issues) for
+Use the [issue tracker](https://github.com/Aequiludium/cocycle-rs/issues) for
 reproducible bugs and substantial API or algorithm proposals. Small, focused fixes
 can be reviewed directly through pull requests. Do not add placeholder implementations for future work.
 
@@ -30,6 +32,44 @@ Public API includes documented numeric, ordering, and error semantics, not only
 Rust signatures. Before publication, describe intentional breaking changes in the
 changelog. After publication, preserve compatibility within a 0.x minor line and
 use a new minor version for incompatible changes. MSRV changes must be explicit.
+
+## Focused algorithm checks
+
+Choose the command for your contribution from a source checkout:
+
+| Path | Tutorial |
+| --- | --- |
+| Diagram statistics, curves and features | [Diagram analysis](docs/development/diagram-analysis.md) |
+| Explicit simplicial construction | [Complex construction](docs/development/complex-construction.md) |
+| Diagram matching distances | [Distance contribution path](docs/development/diagram-analysis.md#contribute-diagram-distances) |
+| Persistence and reduction | [Persistence algorithm walkthrough](docs/development/persistence-reduction.md) |
+
+```sh
+python3 tools/check_algorithm.py diagram-analysis
+python3 tools/check_algorithm.py complex-construction
+python3 tools/check_algorithm.py diagram-distances
+python3 tools/check_algorithm.py persistence-reduction
+```
+
+Each command checks source/documentation hygiene, domain formatting, Clippy for
+the library and selected targets, domain tests, example tests, the example and
+tutorial doctests. Diagram analysis does not run persistent homology; construction
+checks also verify persistence of hand-derived complexes. Distance checks run
+public contracts, private matching oracles and the distance example; context tests
+also compute small supplied and Rips filtrations. Reduction checks run direct
+algorithm and independent-oracle tests, plus filtered-source, field, representative
+and resource integration tests. They use the existing flag example. The lower-star example's
+colocated tests are explicitly run with `cargo test --example complex_construction`;
+ordinary `cargo test` alone does not execute them. No native C++ setup is needed.
+Python invokes the local Rust toolchain; generated files remain in Cargo's target
+directory. New test files or tutorial pages in this path must also be added to
+the focused check.
+
+The author supplies mathematical assumptions, implementation and independent
+tests. Maintainers help with public exports, errors, allocation/execution policies
+and integration. A focused pass is local feedback; maintainers and CI complete
+the applicable full verification before merge. Contributions touching other
+domains use the checks below as well.
 
 ## Verification
 
@@ -48,10 +88,15 @@ cargo run --locked --example flag_persistence
 cargo run --locked --example rips_sphere
 cargo run --locked --example rips_representatives
 cargo run --locked --example sparse_rips
+cargo run --locked --example diagram_analysis
+cargo run --locked --example complex_construction
+cargo test --locked --example complex_construction
+cargo test --locked --release --example complex_construction
 cargo run --locked --example diagram_distances
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
 cargo +1.91.0 test --locked --all-features
 cargo +1.91.0 check --locked --all-targets --all-features
+cargo +1.91.0 test --locked --example complex_construction
 python3 tools/check_source.py
 python3 tools/check_artifacts.py
 python3 tools/check_docs.py
@@ -62,6 +107,10 @@ rustdoc --edition 2024 --test docs/guides/rips.md --extern cocycle=target/debug/
 rustdoc --edition 2024 --test docs/guides/rips-construction.md --extern cocycle=target/debug/libcocycle.rlib -L dependency=target/debug/deps
 rustdoc --edition 2024 --test docs/guides/rips-representatives.md --extern cocycle=target/debug/libcocycle.rlib -L dependency=target/debug/deps
 rustdoc --edition 2024 --test docs/guides/sparse-rips.md --extern cocycle=target/debug/libcocycle.rlib -L dependency=target/debug/deps
+rustdoc --edition 2024 --test docs/guides/filtered-complexes.md --extern cocycle=target/debug/libcocycle.rlib -L dependency=target/debug/deps
+rustdoc --edition 2024 --test docs/development/diagram-analysis.md --extern cocycle=target/debug/libcocycle.rlib -L dependency=target/debug/deps
+rustdoc --edition 2024 --test docs/development/complex-construction.md --extern cocycle=target/debug/libcocycle.rlib -L dependency=target/debug/deps
+rustdoc --edition 2024 --test docs/development/persistence-reduction.md --extern cocycle=target/debug/libcocycle.rlib -L dependency=target/debug/deps
 ```
 
 Select additional checks by the changed contract:
@@ -178,7 +227,7 @@ comparability, sampling and artifact retention; use the
 Releases are an explicit maintainer action. A successful local build is not a
 release. Before the first publication, verify registry-name availability and
 establish the publishing identity. The source repository is
-[huangbogeng/cocycle-rs](https://github.com/huangbogeng/cocycle-rs); repository
+[Aequiludium/cocycle-rs](https://github.com/Aequiludium/cocycle-rs); repository
 bootstrap does not publish a crate or reserve its name.
 
 For every release:
@@ -186,7 +235,9 @@ For every release:
 1. Finalize the version and changelog, review public API and MSRV changes.
 2. Run the required CI jobs for the exact release commit; inspect their results.
 3. Run `cargo package --locked`, inspect the package file list, and execute its
-   `square` example. Exclude raw experiments and temporary files from the crate.
+   `square`, `diagram_analysis`, `diagram_distances` and `complex_construction` examples. Run the
+   packaged construction example's tests with `--example complex_construction`.
+   Exclude raw experiments and temporary files from the crate.
 4. Publish only after those checks pass, then verify installation from crates.io.
 5. Record the release tag and notes for the published source.
 

@@ -1,6 +1,6 @@
 //! Independent H0 by sorted edges and component merges.
-use super::union_find::UnionFind;
 use crate::persistence::execution::WorkBudget;
+use crate::persistence::union_find::UnionFind;
 use crate::{Error, Result};
 
 pub(super) fn compute(

@@ -276,7 +276,7 @@ calls add a request slice. Exact expansion is available; approximation is not.
 | `filtration::SparseRips` | Approximation graph plus insertion radii, blocker rules, vertex mapping and parameter context |
 | `filtration::SparseRipsOptions` | Validated epsilon, optional minimum insertion radius, optional maximum scale and starting vertex; deterministic ties |
 | `geometry::MetricPolicy` | Explicit caller assertion or checked metric hypotheses under a documented numeric policy; never inferred from matrix shape |
-| `complex::FilteredSimplicialComplex` | Frozen explicit simplices and filtration values, lookup, boundaries, faces/cofaces and traversal |
+| `complex::SimplicialComplex` | Frozen explicit simplices and filtration values, lookup, boundaries, faces/cofaces and traversal |
 | `filtration::RipsExpansion` | Explicit complex plus origin, scale coverage and constructed dimension; storage accessor borrows |
 | `persistence::PersistenceOptions` | Named homology dimension, validated field and optional inclusive scale cutoff; separates resource controls from mathematics |
 | `persistence::RepresentativeRequest` | Requested cycle/cocycle kinds at explicit query scales |
@@ -299,7 +299,7 @@ sparse_rips_from_distances(matrix_view, approximation_options, metric_policy)
     -> Result<SparseRips>
 
 FlagFiltration::new(weighted_graph) -> FlagFiltration
-FlagFiltration::expand(max_simplex_dimension) -> Result<FilteredSimplicialComplex>
+FlagFiltration::expand(max_simplex_dimension) -> Result<SimplicialComplex>
 ThresholdRips::expand(max_simplex_dimension) -> Result<RipsExpansion>
 SparseRips::expand(max_simplex_dimension) -> Result<RipsExpansion>
 

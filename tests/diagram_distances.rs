@@ -12,6 +12,112 @@ use cocycle::filtration::FlagFiltration;
 use cocycle::persistence::{ExecutionLimits, PersistenceOptions, compute_flag};
 
 type Distance = fn(&PersistenceDiagram, &PersistenceDiagram, usize) -> cocycle::Result<f64>;
+
+#[test]
+fn distances_respect_gaps_and_selected_dimensions() -> cocycle::Result<()> {
+    use cocycle::diagram::ComputedDimensions;
+    let only_h1 = PersistenceDiagram::with_dimensions(
+        ComputedDimensions::new(vec![1])?,
+        Coverage::Complete,
+        vec![],
+    )?;
+    let separated = PersistenceDiagram::with_dimensions(
+        ComputedDimensions::new(vec![1, 3])?,
+        Coverage::Complete,
+        vec![],
+    )?;
+    for distance in [
+        bottleneck_distance,
+        wasserstein_1_infinity,
+        wasserstein_2_euclidean,
+    ] {
+        // A selected common dimension does not require identical full domains.
+        assert_eq!(distance(&only_h1, &separated, 1)?, 0.);
+        for missing in [0, 2, 3] {
+            assert!(matches!(
+                distance(&only_h1, &separated, missing),
+                Err(cocycle::Error::DimensionNotComputed { .. })
+            ));
+            assert!(matches!(
+                distance(&separated, &only_h1, missing),
+                Err(cocycle::Error::DimensionNotComputed { .. })
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn compatible_results_borrow_common_data_and_keep_witness_indices() -> cocycle::Result<()> {
+    use cocycle::{
+        algebra::PrimeField,
+        diagram::{PersistenceData, PersistenceResult},
+        filtration::RipsBuilder,
+        geometry::PointCloudView,
+        persistence::{PersistenceExt, RepresentativeRequest, RepresentativeSelection},
+    };
+    struct ResearchResult {
+        data: PersistenceData,
+        iterations: usize,
+    }
+    impl AsRef<PersistenceData> for ResearchResult {
+        fn as_ref(&self) -> &PersistenceData {
+            &self.data
+        }
+    }
+    let points = PointCloudView::new(&[0., 1., 2.], 3, 1)?;
+    let source = RipsBuilder::from_points(points);
+    let requests = [RepresentativeRequest::new(
+        0,
+        0.5,
+        RepresentativeSelection::Both,
+    )?];
+    let result = source.persistence().representatives(&requests).compute()?;
+    let common: &PersistenceData = result.as_ref();
+    assert!(std::ptr::eq(common.diagram(), result.diagram()));
+    assert!(std::ptr::eq(common.context(), result.context()));
+    let interval_buffer = result.diagram().intervals().as_ptr();
+    let witnesses = result.representatives().unwrap().to_vec();
+    let (data, representatives) = result.into_parts();
+    assert_eq!(data.diagram().intervals().as_ptr(), interval_buffer);
+    assert_eq!(representatives.as_deref(), Some(witnesses.as_slice()));
+    for witness in representatives.unwrap() {
+        let interval = &data.diagram().intervals()[witness.interval_index()];
+        assert_eq!(interval.dimension(), witness.dimension());
+        assert!(interval.birth() <= witness.scale());
+    }
+    let research = ResearchResult {
+        data,
+        iterations: 7,
+    };
+    let plain = source.persistence().compute()?;
+    assert_eq!(research.iterations, 7);
+    assert_eq!(bottleneck_distance_results(&research, &plain, 0)?, 0.);
+    assert_eq!(
+        wasserstein_1_infinity_results(&plain, &research.data, 0)?,
+        0.
+    );
+    assert_eq!(
+        wasserstein_2_euclidean_results(&research, &research, 0)?,
+        0.
+    );
+    let distance: fn(&PersistenceResult, &ResearchResult, usize) -> cocycle::Result<f64> =
+        bottleneck_distance_results;
+    assert_eq!(distance(&plain, &research, 0)?, 0.);
+    let mod3 = source
+        .persistence()
+        .field(PrimeField::new(3)?)
+        .compute()?
+        .into_data();
+    assert!(matches!(
+        bottleneck_distance_results(&mod3, &research, 0),
+        Err(cocycle::Error::IncompatibleDiagramContext { .. })
+    ));
+    let moved = plain.into_data();
+    assert!(std::ptr::eq(moved.as_ref(), &moved));
+    assert_eq!(moved.into_diagram(), research.data.into_diagram());
+    Ok(())
+}
 const DISTANCES: [Distance; 3] = [
     bottleneck_distance,
     wasserstein_1_infinity,
@@ -390,6 +496,143 @@ fn result_wrappers_validate_fields_without_requiring_identical_contexts() {
     );
     assert_eq!(wasserstein_1_infinity_results(&a, &a, 0).unwrap(), 0.);
     assert_eq!(wasserstein_2_euclidean_results(&a, &a, 0).unwrap(), 0.);
+}
+
+#[test]
+fn result_wrappers_reject_unspecified_scales_but_raw_signed_diagrams_remain_usable() {
+    use cocycle::complex::{Simplex, SimplicialComplex};
+    use cocycle::persistence::{PersistenceBuilder, PersistenceExt};
+
+    let source = SimplicialComplex::new(vec![Simplex::new(vec![0], -2.).unwrap()]).unwrap();
+    let supplied = source
+        .persistence()
+        .max_homology_dimension(0)
+        .compute()
+        .unwrap();
+    let cells = PersistenceBuilder::from_complex(&source)
+        .max_homology_dimension(0)
+        .compute()
+        .unwrap();
+    let graph = FlagFiltration::new(WeightedGraph::new(1, vec![]).unwrap());
+    let edge_lengths = graph
+        .persistence()
+        .max_homology_dimension(0)
+        .compute()
+        .unwrap();
+    for (raw, contextual) in DISTANCES.into_iter().zip([
+        bottleneck_distance_results,
+        wasserstein_1_infinity_results,
+        wasserstein_2_euclidean_results,
+    ]) {
+        // Even self-comparison cannot certify units for an unspecified source.
+        for (left, right) in [
+            (&supplied, &supplied),
+            (&supplied, &cells),
+            (&cells, &cells),
+            (&supplied, &edge_lengths),
+            (&edge_lengths, &supplied),
+        ] {
+            assert!(matches!(
+                contextual(left, right, 0),
+                Err(Error::IncompatibleDiagramContext { .. })
+            ));
+        }
+        assert_eq!(raw(supplied.diagram(), cells.diagram(), 0).unwrap(), 0.);
+        // The caller explicitly interprets these births in a common scalar unit.
+        assert_eq!(
+            raw(supplied.diagram(), edge_lengths.diagram(), 0).unwrap(),
+            2.
+        );
+    }
+}
+
+#[test]
+fn certified_expansion_keeps_scale_convention_but_bare_storage_does_not() {
+    use cocycle::filtration::RipsBuilder;
+    use cocycle::geometry::PointCloudView;
+    use cocycle::persistence::PersistenceExt;
+
+    let points = PointCloudView::new(&[0., 1.], 2, 1).unwrap();
+    let builder = RipsBuilder::from_points(points);
+    let implicit = builder
+        .persistence()
+        .max_homology_dimension(0)
+        .compute()
+        .unwrap();
+    let expanded = builder.build_complex(1).unwrap();
+    let certified = expanded
+        .persistence()
+        .max_homology_dimension(0)
+        .compute()
+        .unwrap();
+    let bare = expanded
+        .complex()
+        .persistence()
+        .max_homology_dimension(0)
+        .compute()
+        .unwrap();
+    for (raw, contextual) in DISTANCES.into_iter().zip([
+        bottleneck_distance_results,
+        wasserstein_1_infinity_results,
+        wasserstein_2_euclidean_results,
+    ]) {
+        assert_eq!(contextual(&implicit, &certified, 0).unwrap(), 0.);
+        assert_eq!(contextual(&certified, &implicit, 0).unwrap(), 0.);
+        assert!(matches!(
+            contextual(&certified, &bare, 0),
+            Err(Error::IncompatibleDiagramContext { .. })
+        ));
+        assert_eq!(raw(certified.diagram(), bare.diagram(), 0).unwrap(), 0.);
+    }
+}
+
+#[test]
+fn modified_sparse_edge_values_measure_diagrams_in_the_declared_parameter() {
+    use cocycle::filtration::{ApproximateRipsBuilder, RipsBuilder};
+    use cocycle::geometry::{MetricPolicy, PointCloudView};
+    use cocycle::persistence::PersistenceExt;
+
+    for unit in [1., 2.] {
+        let coordinates = [0., 3. * unit];
+        let points = PointCloudView::new(&coordinates, 2, 1).unwrap();
+        let exact = RipsBuilder::from_points(points)
+            .persistence()
+            .max_homology_dimension(0)
+            .compute()
+            .unwrap();
+        // With epsilon=3 and later insertion radius 3*unit, the retained edge
+        // is 2*(3*unit - 3*unit/3) = 4*unit. No interleaving bound is asserted
+        // for epsilon >= 1. Both diagrams also have one essential birth at 0.
+        let sparse = ApproximateRipsBuilder::from_points(points, 3., MetricPolicy::Check)
+            .persistence()
+            .max_homology_dimension(0)
+            .compute()
+            .unwrap();
+        assert!(
+            exact
+                .diagram()
+                .intervals()
+                .iter()
+                .any(|i| i.end() == IntervalEnd::Finite(3. * unit))
+        );
+        assert!(
+            sparse
+                .diagram()
+                .intervals()
+                .iter()
+                .any(|i| i.end() == IntervalEnd::Finite(4. * unit))
+        );
+        for (raw, contextual) in DISTANCES.into_iter().zip([
+            bottleneck_distance_results,
+            wasserstein_1_infinity_results,
+            wasserstein_2_euclidean_results,
+        ]) {
+            // Matching the finite points costs unit; sending both to the
+            // diagonal is more expensive under each of the three metrics.
+            assert_eq!(contextual(&exact, &sparse, 0).unwrap(), unit);
+            assert_eq!(raw(exact.diagram(), sparse.diagram(), 0).unwrap(), unit);
+        }
+    }
 }
 
 #[test]

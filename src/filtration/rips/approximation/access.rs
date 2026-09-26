@@ -2,13 +2,14 @@
 use super::SparseRips;
 use crate::Result;
 use crate::complex::Simplex;
-use crate::filtration::flag::{CliqueAccess, SimplicialAccess};
+use crate::filtration::flag::CliqueAccess;
+use crate::filtration::simplicial::ZeroBornSimplicialAccess;
 
 pub(crate) struct SparseRipsAccess<'a> {
     pub(crate) input: &'a SparseRips,
     pub(crate) cutoff: f64,
 }
-impl SimplicialAccess for SparseRipsAccess<'_> {
+impl ZeroBornSimplicialAccess for SparseRipsAccess<'_> {
     fn vertex_count(&self) -> usize {
         self.input.graph.vertex_count()
     }

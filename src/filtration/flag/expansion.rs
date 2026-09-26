@@ -1,28 +1,29 @@
 //! Explicit clique expansion shared by supplied flags and exact Rips.
-use super::cliques::{CliqueAccess, SimplicialAccess, next_dimension};
-use crate::complex::{FilteredSimplicialComplex, WeightedGraph};
+use super::cliques::CliqueAccess;
+use crate::complex::{SimplicialComplex, WeightedGraph};
+use crate::filtration::simplicial::{ZeroBornSimplicialAccess, next_dimension};
 use crate::{Error, Result};
 
 pub(crate) fn expand(
     graph: &WeightedGraph,
     max_dimension: usize,
-) -> Result<(FilteredSimplicialComplex, bool)> {
+) -> Result<(SimplicialComplex, bool)> {
     let access = CliqueAccess::Sparse(graph, graph.max_edge());
     expand_access(&access, max_dimension)
 }
 
 pub(crate) fn expand_access(
-    access: &impl SimplicialAccess,
+    access: &impl ZeroBornSimplicialAccess,
     max_dimension: usize,
-) -> Result<(FilteredSimplicialComplex, bool)> {
+) -> Result<(SimplicialComplex, bool)> {
     expand_access_with(access, max_dimension, &mut || Ok(()))
 }
 
 pub(crate) fn expand_access_with(
-    access: &impl SimplicialAccess,
+    access: &impl ZeroBornSimplicialAccess,
     max_dimension: usize,
     checkpoint: &mut impl FnMut() -> Result<()>,
-) -> Result<(FilteredSimplicialComplex, bool)> {
+) -> Result<(SimplicialComplex, bool)> {
     checkpoint()?;
     let mut level = access.vertices()?;
     let mut simplices = Vec::new();
@@ -57,7 +58,7 @@ pub(crate) fn expand_access_with(
         }
     }
     Ok((
-        FilteredSimplicialComplex::from_simplices(simplices, checkpoint)?,
+        SimplicialComplex::from_simplices(simplices, checkpoint)?,
         complete,
     ))
 }

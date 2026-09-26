@@ -36,7 +36,7 @@ odd-prime homology. Field selection is a mathematical input, not a speed switch.
 
 Each supported source uses the same `.persistence().representatives(&requests)`
 request. `RepresentativeRequest` specifies a dimension,
-finite nonnegative scale and `Cycles`, `Cocycles` or `Both`. One representative of
+finite scale (signed scales are supported for supplied filtrations) and `Cycles`, `Cocycles` or `Both`. One representative of
 each selected kind is returned for every interval active at that query.
 
 ```rust

@@ -1,14 +1,14 @@
 //! Frozen blocker-aware topology with independent scale and dimension provenance.
 use super::{SparseRips, SparseRipsAccess};
 use crate::Result;
-use crate::complex::FilteredSimplicialComplex;
+use crate::complex::SimplicialComplex;
 use crate::filtration::RipsInputKind;
 use crate::filtration::{Coverage, RipsApproximation};
 
 /// Explicit sparse Rips skeleton with original vertex labels.
 #[derive(Clone, Debug)]
 pub struct SparseRipsExpansion {
-    pub(crate) complex: FilteredSimplicialComplex,
+    pub(crate) complex: SimplicialComplex,
     pub(crate) metadata: RipsApproximation,
     pub(crate) coverage: Coverage,
     pub(crate) kind: RipsInputKind,
@@ -18,7 +18,7 @@ pub struct SparseRipsExpansion {
 }
 impl SparseRipsExpansion {
     /// Frozen oriented incidence. Every simplex uses original vertex IDs.
-    pub fn complex(&self) -> &FilteredSimplicialComplex {
+    pub fn complex(&self) -> &SimplicialComplex {
         &self.complex
     }
     /// Sampling and approximation provenance.

@@ -13,7 +13,9 @@
 //! endpoint categories are outside this API's input domain.
 //!
 //! Raw diagrams do not establish field or source compatibility. The `_results`
-//! functions additionally check computation contexts. Distances between sparse
+//! functions additionally require equal fields and declared edge-length parameter
+//! conventions. Both APIs leave units and normalization to the caller; matching
+//! conventions do not establish those facts. Distances between sparse
 //! approximations describe the two supplied diagrams, not the unknown original
 //! diagrams and not an approximation error certificate.
 //!
@@ -29,7 +31,7 @@
 //! # Ok::<(), cocycle::Error>(())
 //! ```
 
-use crate::diagram::{Coverage, IntervalEnd, PersistenceDiagram, PersistenceResult};
+use crate::diagram::{Coverage, IntervalEnd, PersistenceData, PersistenceDiagram};
 use crate::{Error, Result};
 
 // The standalone worker opts in with --cfg cocycle_distance_bench. Neither
@@ -109,50 +111,58 @@ pub fn wasserstein_2_euclidean(
 
 /// Bottleneck distance with additional computation-context validation.
 ///
-/// Requires equal coefficient characteristics. All current computation contexts
-/// use edge-length scales. Vertex counts, construction kinds and cutoff requests
+/// Accepts common data and compatible wrappers through a borrow of already stored
+/// [`PersistenceData`]. This adapter performs no copying or context reconstruction.
+///
+/// Requires equal coefficient characteristics and declared edge-length scales.
+/// Unspecified scales are rejected, including two unspecified scales: equality
+/// does not establish comparable units. Call the raw-diagram function after
+/// establishing a common scale yourself for supplied filtrations. Even declared
+/// edge lengths do not certify physical units or normalization across datasets;
+/// the caller must establish them before interpreting the returned distance.
+/// Original and modified sparse edge values use the same parameter convention,
+/// but describe different filtrations. Their distance compares the resulting
+/// diagrams and is not a distance between the original pairwise metrics.
+/// Vertex counts, construction kinds and cutoff requests
 /// need not agree when both diagrams have complete coverage. Approximation
 /// provenance remains in the borrowed results; no original-data guarantee is
 /// inferred from this scalar distance.
 ///
 /// # Errors
-/// Returns [`Error::IncompatibleDiagramContext`] for unequal fields, in addition
-/// to errors from [`bottleneck_distance`].
-pub fn bottleneck_distance_results(
-    first: &PersistenceResult,
-    second: &PersistenceResult,
-    dimension: usize,
-) -> Result<f64> {
-    check_context(first, second)?;
-    bottleneck_distance(first.diagram(), second.diagram(), dimension)
+/// Returns [`Error::IncompatibleDiagramContext`] for unequal fields or unsupported
+/// scale conventions, in addition to errors from [`bottleneck_distance`].
+pub fn bottleneck_distance_results<L, R>(first: &L, second: &R, dimension: usize) -> Result<f64>
+where
+    L: AsRef<PersistenceData> + ?Sized,
+    R: AsRef<PersistenceData> + ?Sized,
+{
+    distance_results(first.as_ref(), second.as_ref(), dimension, Kind::Bottleneck)
 }
 
 /// W1-L-infinity distance with the context checks of [`bottleneck_distance_results`].
 ///
 /// # Errors
-/// Returns an error for incompatible fields or any [`wasserstein_1_infinity`]
+/// Returns an error for incompatible fields/scales or any [`wasserstein_1_infinity`]
 /// input, allocation or numerical failure.
-pub fn wasserstein_1_infinity_results(
-    first: &PersistenceResult,
-    second: &PersistenceResult,
-    dimension: usize,
-) -> Result<f64> {
-    check_context(first, second)?;
-    wasserstein_1_infinity(first.diagram(), second.diagram(), dimension)
+pub fn wasserstein_1_infinity_results<L, R>(first: &L, second: &R, dimension: usize) -> Result<f64>
+where
+    L: AsRef<PersistenceData> + ?Sized,
+    R: AsRef<PersistenceData> + ?Sized,
+{
+    distance_results(first.as_ref(), second.as_ref(), dimension, Kind::W1)
 }
 
 /// W2-Euclidean distance with the context checks of [`bottleneck_distance_results`].
 ///
 /// # Errors
-/// Returns an error for incompatible fields or any [`wasserstein_2_euclidean`]
+/// Returns an error for incompatible fields/scales or any [`wasserstein_2_euclidean`]
 /// input, allocation or numerical failure.
-pub fn wasserstein_2_euclidean_results(
-    first: &PersistenceResult,
-    second: &PersistenceResult,
-    dimension: usize,
-) -> Result<f64> {
-    check_context(first, second)?;
-    wasserstein_2_euclidean(first.diagram(), second.diagram(), dimension)
+pub fn wasserstein_2_euclidean_results<L, R>(first: &L, second: &R, dimension: usize) -> Result<f64>
+where
+    L: AsRef<PersistenceData> + ?Sized,
+    R: AsRef<PersistenceData> + ?Sized,
+{
+    distance_results(first.as_ref(), second.as_ref(), dimension, Kind::W2)
 }
 
 #[derive(Clone, Copy)]
@@ -244,14 +254,36 @@ fn distance(
     Ok(if value == 0.0 { 0.0 } else { value })
 }
 
-fn check_context(first: &PersistenceResult, second: &PersistenceResult) -> Result<()> {
+fn distance_results(
+    first: &PersistenceData,
+    second: &PersistenceData,
+    dimension: usize,
+    kind: Kind,
+) -> Result<f64> {
+    check_context(first, second)?;
+    distance(first.diagram(), second.diagram(), dimension, kind)
+}
+
+fn check_context(first: &PersistenceData, second: &PersistenceData) -> Result<()> {
     if first.context().characteristic() != second.context().characteristic() {
         return Err(Error::IncompatibleDiagramContext {
             reason: "coefficient field characteristics differ",
         });
     }
-    // ComputationContext currently guarantees edge-length units for every kind.
-    // Do not compare whole contexts: differing datasets and approximation
-    // parameters are valid inputs to a distance between their actual diagrams.
+    use crate::filtration::FiltrationScale;
+    // An unspecified scale is not a shared unit, even for the same source kind.
+    // Match the supported convention explicitly so future conventions require
+    // a deliberate compatibility policy here.
+    if !matches!(
+        (
+            first.context().filtration().scale(),
+            second.context().filtration().scale(),
+        ),
+        (FiltrationScale::EdgeLength, FiltrationScale::EdgeLength)
+    ) {
+        return Err(Error::IncompatibleDiagramContext {
+            reason: "diagram distance requires declared edge-length parameter conventions",
+        });
+    }
     Ok(())
 }

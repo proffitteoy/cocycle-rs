@@ -28,6 +28,16 @@ impl PersistenceOptions {
             field: PrimeField::default(),
         })
     }
+    pub(super) fn for_filtration(
+        max_homology_dimension: usize,
+        value: Option<f64>,
+    ) -> Result<Self> {
+        Ok(Self {
+            max_homology_dimension,
+            max_edge: value.map(finite_scale).transpose()?,
+            field: PrimeField::default(),
+        })
+    }
     /// Select a validated prime coefficient field; all other options are preserved.
     pub fn with_field(mut self, field: PrimeField) -> Self {
         self.field = field;
@@ -78,4 +88,14 @@ pub(super) fn source_range(
             _ => Ok((max_edge, Coverage::Complete)),
         },
     }
+}
+
+pub(super) fn finite_scale(value: f64) -> Result<f64> {
+    if !value.is_finite() {
+        return Err(Error::NonFiniteValue {
+            field: "filtration scale",
+            index: None,
+        });
+    }
+    Ok(crate::canonical_zero(value))
 }

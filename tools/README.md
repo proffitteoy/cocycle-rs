@@ -76,12 +76,21 @@ Its raw unpaired endpoints are compared along with separately checked Rust cover
 
 ## Documentation and tool verification
 
+[check_algorithm.py](check_algorithm.py) provides focused `diagram-analysis`,
+`diagram-distances`, `complex-construction` and `persistence-reduction` checks for
+algorithm contributors. See the
+[command and scope](../CONTRIBUTING.md#focused-algorithm-checks) and
+[walkthroughs](../docs/development/algorithm-contributions.md). It uses the local Rust
+toolchain and Python standard library, stops on failure, and does not invoke
+native comparisons. These developer tools are available in source checkouts;
+crate packages include the tutorial and runnable Rust example, not `tools/`.
+
 ```sh
 python3 tools/check_source.py
 python3 tools/check_artifacts.py
 python3 tools/check_docs.py
 python3 -m unittest discover -s tools -p 'test_*.py'
-rustfmt --edition 2024 --check tools/diagram_dump.rs tools/benchmark_driver.rs benches/native/cocycle.rs tools/reference/rips_cocycle.rs tools/reference/sparse_cocycle.rs benches/pipeline/cocycle.rs
+rustfmt --edition 2024 --check tools/diagram_dump.rs tools/benchmark_driver.rs benches/native/cocycle.rs tools/reference/rips_cocycle.rs tools/reference/sparse_cocycle.rs benches/pipeline/cocycle.rs benches/distances/cocycle.rs
 ```
 
 Run the artifact check after staging. It rejects generated paths and log/archive/

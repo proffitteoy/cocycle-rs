@@ -10,8 +10,8 @@ use crate::diagram::{Coverage, PersistenceDiagram};
 use crate::geometry::{DissimilarityView, PointCloudView, euclidean_distances};
 
 use super::execution::WorkBudget;
-use super::flag;
 use super::{ExecutionLimits, PersistenceOptions, RepresentativeRequest};
+use super::{flag, simplicial};
 use crate::filtration::flag::CliqueAccess;
 pub(super) mod approximation;
 pub(super) mod expanded;
@@ -143,7 +143,7 @@ pub(in crate::persistence) fn compute_rips_from_distances_budget(
         Some(t) if t < input.diameter() => (t, Coverage::Through(t)),
         _ => (input.diameter(), Coverage::Complete),
     };
-    let (diagram, representatives) = flag::finish(
+    let (diagram, representatives) = simplicial::finish_zero_born(
         &CliqueAccess::Dense(input, cutoff),
         options,
         requests,
@@ -159,18 +159,18 @@ pub(in crate::persistence) fn compute_rips_from_distances_budget(
             )
         },
     )?;
-    Ok(PersistenceResult {
+    Ok(PersistenceResult::new(
         diagram,
+        ComputationContext::new(
+            options.field(),
+            FiltrationKind::RipsDissimilarities,
+            input.len(),
+            options.max_edge(),
+            None,
+            None,
+        ),
         representatives,
-        context: ComputationContext {
-            approximation: None,
-            field: options.field(),
-            kind: FiltrationKind::RipsDissimilarities,
-            vertex_count: input.len(),
-            requested_cutoff: options.max_edge(),
-            construction_cutoff: None,
-        },
-    })
+    ))
 }
 
 /// Compute from an exact threshold graph, preserving its original-input coverage.
@@ -224,7 +224,7 @@ pub(in crate::persistence) fn compute_threshold_rips_budget(
         input.graph().max_edge(),
         options.max_edge(),
     )?;
-    let (diagram, representatives) = flag::finish(
+    let (diagram, representatives) = simplicial::finish_zero_born(
         &CliqueAccess::Sparse(input.graph(), cutoff),
         options,
         requests,
@@ -245,18 +245,18 @@ pub(in crate::persistence) fn compute_threshold_rips_budget(
         RipsInputKind::Euclidean => FiltrationKind::RipsEuclidean,
         RipsInputKind::Custom => FiltrationKind::RipsCustom,
     };
-    Ok(PersistenceResult {
+    Ok(PersistenceResult::new(
         diagram,
-        representatives,
-        context: ComputationContext {
-            approximation: None,
-            field: options.field(),
+        ComputationContext::new(
+            options.field(),
             kind,
-            vertex_count: input.graph().vertex_count(),
-            requested_cutoff: options.max_edge(),
-            construction_cutoff: input.requested_cutoff(),
-        },
-    })
+            input.graph().vertex_count(),
+            options.max_edge(),
+            input.requested_cutoff(),
+            None,
+        ),
+        representatives,
+    ))
 }
 
 /// Compute Euclidean prime-field persistence with owned mathematical context.
@@ -300,13 +300,20 @@ pub fn compute_rips_from_points_with_representatives(
         compute_threshold_rips_with_representatives(&graph, options, requests, limits)
     } else {
         let values = euclidean_distances(input)?;
-        let mut result = compute_rips_from_distances_with_representatives(
+        let result = compute_rips_from_distances_with_representatives(
             DissimilarityView::new(&values, input.len())?.into(),
             options,
             requests,
             limits,
         )?;
-        result.context.kind = crate::diagram::FiltrationKind::RipsEuclidean;
-        Ok(result)
+        let context = crate::diagram::ComputationContext::new(
+            options.field(),
+            crate::diagram::FiltrationKind::RipsEuclidean,
+            input.len(),
+            options.max_edge(),
+            None,
+            None,
+        );
+        Ok(result.with_context(context))
     }
 }

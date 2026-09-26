@@ -2,13 +2,17 @@
 
 [Documentation](../README.md) / Development
 
-This page describes implemented code. Proposed capabilities and their acceptance
-gates belong in the [kernel design](../design/kernel.md).
+This page describes implemented code. Proposed responsibilities and type boundaries
+belong in the [kernel design](../design/kernel.md).
 
 Cocycle is one Rust crate with a small public API. Modules follow mathematical
 responsibilities without requiring each computation to construct every possible
 intermediate object. The [mathematical specification](../reference/mathematics.md)
 defines invariants; rustdoc defines public signatures and error behavior.
+
+Algorithm authors can start with the [contribution paths](algorithm-contributions.md)
+for focused descriptor, diagram-distance and explicit-construction workflows. This page owns
+the broader dependency map used for kernel integration.
 
 ## Production code
 
@@ -21,7 +25,7 @@ src/
   algebra/
     field/mod.rs                 validated PrimeField and modular arithmetic
     column/mod.rs                private ordered sparse coefficient columns
-    reduction/boundary.rs        forward reduction retaining transformations
+    reduction/boundary.rs        boundary reduction; optional basis transformations
   geometry/
     point_cloud.rs               borrowed coordinate validation
     dissimilarity.rs             existing condensed input contract
@@ -30,16 +34,21 @@ src/
     distance.rs                  checked scalar distance/cutoff operations
     euclidean.rs                 shared pair evaluation and dense conversion
   complex/
+    filtered.rs                  public four-method FilteredComplex contract
     graph/
       mod.rs                     owned WeightedGraph, edges and queries
       adjacency.rs               compact sorted adjacency construction
     simplicial/
-      mod.rs                     frozen complex, lookup and stored incidence
+      mod.rs                     validated SimplicialComplex, lookup and stored incidence
       simplex.rs                 canonical vertices, IDs and shared filtration order
       incidence.rs               oriented codimension-one boundary terms
   filtration/
     provenance.rs                construction coverage and source-kind identity
-    expansion/mod.rs             contextual explicit result and controlled construction
+    context.rs                   typed source metadata and declared scale convention
+    expansion/mod.rs             source-specific controlled expansion adapters
+    simplicial/
+      mod.rs                     contextual explicit result and source certificates
+      access.rs                  private zero-born coface access for Rips/flag paths
     rips/
       builder.rs                 exact borrowed settings and one-shot callbacks
       exact.rs                   ThresholdRips construction, provenance, cone bound
@@ -60,31 +69,40 @@ src/
       sparse.rs                  sorted neighbor-intersection cofacets
       index.rs                   checked edge/triangle IDs and decoding
       order.rs                   compact H1 entry comparison adapter
-      cliques.rs                 dimension-generic dense/sparse/explicit access
+      cliques.rs                 dense/sparse clique enumeration
       expansion.rs               shared explicit clique construction
   persistence/
     mod.rs                       public exports and result normalization
     execution.rs                 compatibility control imports
     builder.rs                   borrowed analysis settings and validated execution
     source.rs                    sealed extension and private source dispatch
-    options.rs                   prime-field PersistenceOptions
+    options.rs                   compatibility options and signed-scale validation
+    filtered.rs                  external filtered-cell validation and source adaptation
+    boundary/
+      mod.rs                     ordinary diagrams from selected owned columns
+      input.rs                   shared column/ID/dimension/value working input
+      tests.rs                   hand-derived pairs and independent transformation checks
+    union_find.rs                connectivity shared by specialized H0/H1 paths
+    simplicial/
+      mod.rs                     explicit analysis and certified range handling
+      input.rs                   selected boundary columns from frozen incidence
+      cohomology.rs              zero-born prime-field coface reduction with clearing
+      representatives/
+        basis.rs                 shared cycles and interval association
+        request.rs               dimension, signed scale and selection
+        complex.rs               zero-born implicit skeleton materialization
+        dual.rs                  scale-specific dual cocycle basis
     rips/
       mod.rs                     legacy/new Rips entry points and source coverage
       options.rs                 compatible RipsOptions
       expanded.rs                explicit incidence computation and dimension checks
       approximation.rs           sparse Rips computation and context assembly
     flag/
-      mod.rs                     shared dispatch and supplied-graph entry point
+      mod.rs                     supplied-graph entry points and context
+      dispatch.rs                default exact H0/F2 H1/general algorithm selection
       h0.rs                      independent H0 edge scan
-      union_find.rs              private connectivity shared by H0/H1
-      representatives/
-        basis.rs                 persistent cycles and interval association
-        request.rs               scale/dimension/selection validation
-        complex.rs               opt-in skeleton and oriented boundary assembly
-        dual.rs                  scale-specific dual cocycle basis
       cohomology/
         mod.rs                   shared dense/sparse implicit F2 H1 reduction
-        dimensions.rs            prime-field implicit reduction with clearing
         tests.rs                 optimization/duality tests
         profiling.rs             explicit diagnostic tests
     tests.rs                     independent Rips/graph oracle comparisons
@@ -92,6 +110,8 @@ src/
   diagram/
     interval.rs                  interval validation and endpoint semantics
     persistence_diagram.rs       owned multiset and coverage
+    dimensions.rs                normalized nonempty computed dimension sets
+    data.rs                      shared owned diagram/context and borrowing
     computation.rs               owned PersistenceResult and source context
     representative.rs            owned chain/cochain terms and local interval IDs
   descriptors/                   diagram-only lifetimes and Betti curves
@@ -112,18 +132,21 @@ files. Public paths are re-exported from domains, not every private directory.
 | --- | --- | --- |
 | `algebra` | Validated prime fields and private sparse arithmetic/reduction | Error utilities |
 | `geometry` | Input validation and distance access | Error utilities |
-| `complex` | Checked weighted graphs and frozen simplicial incidence | Geometry scalar validation, error utilities |
+| `complex` | Checked graphs, simplicial incidence and filtered-cell contract | Geometry scalar validation, execution, error utilities |
 | `execution` | Immutable controls and private per-operation budget | Error utilities |
-| `filtration` | Rips construction, provenance and shared flag access | Geometry, complex, execution, error utilities |
+| `filtration` | Construction, source context, coverage and private coface access | Geometry, complex, execution, error utilities |
 | `persistence` | Algorithms, options, interval and representative assembly | Algebra, geometry, filtration, diagram, execution |
 | `diagram` | Algorithm-independent result ownership and validation | Algebra field identity, filtration provenance, error utilities |
 | `descriptors` | Read diagrams without recomputing persistence | Diagram, error utilities |
-| `diagram_distances` | Match complete diagrams with bottleneck/L-infinity, W1/L-infinity or W2/Euclidean costs | Diagram and context types, error utilities |
+| `diagram_distances` | Match complete diagrams with bottleneck/L-infinity, W1/L-infinity or W2/Euclidean costs | Diagram and filtration scale types, error utilities |
 
 Geometry and diagram code do not call persistence. Filtration code does not call
 persistence. Descriptors do not inspect source coordinates or algorithm state.
 Public graph construction and frozen explicit simplicial expansion are available.
-Public boundary-matrix traits and backend registries are not implemented.
+The public `FilteredComplex` contract drives generic boundary reduction. It does
+not require simplex vertex lists, construction methods or mutable algorithm keys.
+No backend registry or Alpha/cubical construction is implied. See the
+[filtered-complex guide](../guides/filtered-complexes.md) for source semantics.
 
 Each implemented domain has a directory, even while its implementation is small.
 The domain's `mod.rs` documents its scope and exports its public API; named child
@@ -165,7 +188,10 @@ functions retain their existing persistence-only scope and test coverage.
 
 The legacy point API and unrestricted richer point API use a condensed distance
 buffer. The richer point API with a finite cutoff streams distances into a
-threshold graph. Supplied graphs never require a dense matrix. H0-only requests use
+threshold graph. Direct exact point analysis retains edges through the smaller of
+the construction and analysis caps, while checking every pair and preserving the
+original construction cap in result context. `prepare()` retains the construction
+range for reuse. Supplied graphs never require a dense matrix. H0-only requests use
 union-find. F2 H0/H1 requests use the specialized implicit Rips path: ordered edges supply H0
 merges and candidate H1 births; triangle cofacets are generated during reverse
 coboundary reduction. Stored change-of-basis columns and virtual zero-lifetime
@@ -191,14 +217,21 @@ already processed in reverse order can supply a virtual owner. This preserves
 the [reconstruction invariant](../reference/mathematics.md#implicit-reconstruction-invariant).
 Explicit reduced-column payloads and replay checks exist only in tests.
 
-Higher-dimensional and odd-prime requests dispatch to `cohomology/dimensions.rs`. This path
+Higher-dimensional and odd-prime implicit Rips/flag requests dispatch to
+`simplicial/cohomology.rs`. This zero-born path
 classifies H0 edges, then advances through dimensions with clearing. It retains
 one ordered simplex dimension, pivot owners and coefficient-bearing transformation
 columns; reduced
 coboundaries are regenerated on demand. Ordered vertex tuples avoid binomial-ID
-overflow in sparse high-dimensional input. `cliques.rs` supplies dense candidates,
-common neighbors from the shortest sparse adjacency list, or stored explicit
-incidence through one private `SimplicialAccess` contract. The specialized H1
+overflow in sparse high-dimensional input. `flag/cliques.rs` supplies dense candidates or common neighbors from the shortest
+sparse adjacency list through the private `ZeroBornSimplicialAccess` contract.
+The compatibility expansion entry points also adapt their zero-born stored
+incidence to this contract. Diagram-only explicit simplicial analysis selects
+this path when all vertices are born at zero and the cutoff is nonnegative or
+absent. Construction caches this invariant from actual vertex values, together
+with vertex count and maximum dimension. Zero-born access reads the vertex prefix
+without scanning higher-dimensional simplices. Stored cofaces
+preserve non-flag topology and delayed higher-simplex values. The specialized H1
 path keeps its existing apparent/emergent shortcuts; the generic path currently
 uses clearing without those shortcuts. Oriented cofacets use the sign of their
 omitted vertex; pivot columns are normalized over the selected field. No claim
@@ -210,11 +243,24 @@ the compact H1 entry order use the comparison authority in `complex/simplicial`.
 `SimplicialFiltration` retains construction dimension and scale provenance
 separately for exact Rips, approximation and supplied flags. The old expansion
 types remain available during migration.
-Explicit computation reads its incidence, rejecting insufficient skeletons unless
-expansion certified clique exhaustion. Graph construction and expansion do not
+Explicit builder computation reads stored incidence, retaining H0 union-find
+and dimension-wise clearing for zero-born inputs. Other inputs and representative
+requests use `simplicial/input.rs` to convert selected stored boundaries to field
+columns. The immutable concrete type supplies face closure, ordered unique IDs
+and oriented incidence, so this reader does not recheck them or compute the
+boundary square. Its ID map covers only selected simplices, and ordered traversal
+stops at the analysis cutoff. It still visits preceding higher-dimensional cells
+to select the requested skeleton. External `FilteredComplex` inputs keep the
+validating reader in `filtered.rs`; both readers produce `boundary::BoundaryInput`.
+This working input carries selected IDs, dimensions, values and columns. Source
+coverage and vertex counts stay in the adapters. `boundary::diagram` consumes
+the input with field, dimension and established coverage; it does not import a
+Builder, source dispatch or a particular complex representation.
+Explicit computation rejects insufficient skeletons unless expansion certified
+clique exhaustion. Graph construction and expansion do not
 invoke persistence, and computation does not mutate stored topology.
 
-H0 and H1 both use `src/persistence/flag/union_find.rs`, with private state.
+H0 and H1 both use `src/persistence/union_find.rs`, with private state.
 The component only tracks connectivity; its callers decide when to stop scanning
 and how a merge contributes persistence pairs. H1 does not import H0's algorithm.
 
@@ -239,12 +285,22 @@ adds owned source context without changing the diagram or descriptors. Explicit
 CSR-like offsets and neighbors belong to graph storage; pivots and heaps stay
 private to each computation.
 
-Requested representatives use `flag/representatives`, materializing only the
-required skeleton and assembling oriented boundaries. `algebra/reduction` owns
+Requested representatives use `simplicial/representatives`. Implicit sources
+materialize the required skeleton and assemble oriented boundaries; explicit
+builder sources read frozen incidence through `simplicial/input.rs`. `algebra/reduction` owns
 ordinary forward reduction and transformations, independently of filtration and
 diagram types. `algebra/column` supplies sparse coefficient operations shared
 with implicit cohomology and dual solves. The private test oracle remains separate.
 Finite cycles use reduced death columns; unpaired cycles use birth transformations.
+
+`flag/dispatch.rs` owns default exact-flag algorithm selection and applicable
+preparation such as dense cone stopping. Its selected algorithms never call back
+into dispatch. Explicit and approximate Rips adapters call simplicial cohomology
+directly, retaining stored cofaces and approximation blockers. The optional-basis
+policy is `simplicial::finish_zero_born`; algorithms with other input or witness
+contracts need not use it. Shared mathematical options do not imply a universal
+algorithm protocol. The [reduction walkthrough](persistence-reduction.md) traces
+the owned-column and implicit-access alternatives.
 `representatives/dual.rs` solves scale-specific boundary-annihilation and cycle
 pairing constraints. Terms leave the computation as original vertex lists and
 canonical coefficients, associated with positions in this result's sorted diagram.
@@ -299,6 +355,38 @@ public abstraction only when a concrete capability needs it and its validation
 contract can be specified. A second filtration need not use a simplex-based
 representation: it can share diagrams while owning its own input and algorithm.
 
+Current integration has specific limits. `PersistenceExt` is sealed, its Builder
+compute hook is private, and column arithmetic and work budgets are crate-internal.
+`PersistenceData`, `ComputationContext` and `PersistenceResult` have no public
+constructors. These facilities support in-crate
+contributions, not a stable external algorithm plugin API. External callers can
+construct `PersistenceDiagram` or implement `FilteredComplex` for the generic path.
+That trait's `impl Iterator` returns make it a static generic interface, not a
+`dyn`-compatible one. This does not prevent downstream types from implementing it.
+
+`PersistenceDiagram` owns a nonempty `ComputedDimensions` set. `new(q, ...)`
+records every dimension through q; `with_dimensions` supports H1-only and gapped
+domains. `max_dimension()` is only the greatest member. Consumers query membership
+through `computed_dimensions()` or `intervals_in_dimension`; an absent dimension
+is an error even below the maximum. Current builders still compute contiguous
+domains. Representative terms use simplex vertex lists, with persistent-cycle and
+dual cocycle guarantees; generic cell computation still rejects representative requests.
+
+`PersistenceResult` composes `PersistenceData` with optional representatives.
+The common data owns diagram/context and exposes immutable borrows. Compatible
+wrappers implement `AsRef<PersistenceData>` without converting, validating or
+reconstructing context. Context-aware distance facades borrow each operand's data
+then call a concrete implementation; raw descriptors continue to borrow diagrams.
+`into_parts` moves data and witnesses together without reordering interval indices.
+Source adapters use common internal result/context constructors; construction
+facts and analysis settings remain separate from the computed diagram's domain.
+See the [result migration](../design/kernel.md#result-api-migration) for the
+pre-release semantic and signature changes.
+The [kernel revision](../design/kernel.md#implementation-sequence) records the
+implemented sequence and identifies separate future workstreams.
+Its [extension policy](../design/kernel.md#extension-boundaries) distinguishes
+static adaptation, result import and runtime selection.
+
 Higher-dimensional Rips belongs at the filtration/cohomology boundary. Diagram
 distances and landscapes can consume existing diagrams without changing Rips.
 Non-prime coefficient rings would require different algebra and reduction
@@ -315,7 +403,7 @@ source evidence behind that direction.
 
 Sparse Rips construction owns its compact graph, insertion radii and blocker.
 The graph alone is insufficient to reconstruct its higher topology. Its access
-implementation and explicit incidence implement the same `SimplicialAccess`
+implementation and explicit incidence implement the same `ZeroBornSimplicialAccess`
 contract, including zero-born original vertex labels and a compact position map
 for union-find. Oriented generic cohomology and representative reduction reuse
 this access without approximation-specific algebra. The blocker is hereditary,
@@ -326,3 +414,26 @@ retained IDs, metric evidence and conditional bound targets. This module depends
 only on geometry's evidence enum, not on a borrowed distance input or algorithm.
 Descriptors still consume ordinary diagrams; a caller choosing to discard result
 context also discards approximation provenance. See the [sparse guide](../guides/sparse-rips.md).
+
+## Shared filtered-complex boundary
+
+`complex::SimplicialComplex` is the canonical concrete container;
+`FilteredSimplicialComplex` is a compatibility alias. It validates face closure,
+unique simplices and filtration monotonicity before freezing. The public
+`FilteredComplex` trait exposes only cells, dimensions, values and integer
+boundaries. `persistence/filtered.rs` reads this contract without graph or Rips
+assumptions. Its diagram-only reducer retains no representative transformations.
+Explicit simplicial representatives use the concrete frozen-incidence reader
+in `persistence/simplicial/input.rs`, followed by the existing boundary reducer
+and basis/dual extraction. Direct Rips engines retain their zero-born coface contract.
+
+`filtration::SimplicialFiltration` is a certificate-bearing construction result,
+not a second topology container. It owns `SimplicialComplex` plus source coverage
+and dimension evidence. `ComputationContext` reuses `FiltrationContext`, whose
+typed source keeps Rips approximation metadata local to the Rips variant. Stored
+simplex values determine the maximum filtration value; maximum edge value is not
+a generic completeness certificate. Source units are explicit or unspecified.
+
+Supplied signed filtrations and non-simplicial cell adapters are covered by
+`tests/filtered_complex.rs`. Alpha geometric predicates and triangulation remain
+future geometry work; no empty directories or placeholder constructors exist.

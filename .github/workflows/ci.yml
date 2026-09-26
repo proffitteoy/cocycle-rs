@@ -41,6 +41,11 @@ jobs:
       - run: rustdoc --edition 2024 --test docs/guides/rips-construction.md --extern cocycle=target/debug/libcocycle.rlib -L dependency=target/debug/deps
       - run: rustdoc --edition 2024 --test docs/guides/rips-representatives.md --extern cocycle=target/debug/libcocycle.rlib -L dependency=target/debug/deps
       - run: rustdoc --edition 2024 --test docs/guides/sparse-rips.md --extern cocycle=target/debug/libcocycle.rlib -L dependency=target/debug/deps
+      - run: rustdoc --edition 2024 --test docs/guides/filtered-complexes.md --extern cocycle=target/debug/libcocycle.rlib -L dependency=target/debug/deps
+      - run: python tools/check_algorithm.py diagram-analysis
+      - run: python tools/check_algorithm.py complex-construction
+      - run: python tools/check_algorithm.py diagram-distances
+      - run: python tools/check_algorithm.py persistence-reduction
       - run: cargo doc --locked --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
@@ -64,6 +69,10 @@ jobs:
       - run: cargo run --locked --example rips_sphere
       - run: cargo run --locked --example rips_representatives
       - run: cargo run --locked --example sparse_rips
+      - run: cargo run --locked --example diagram_analysis
+      - run: cargo run --locked --example complex_construction
+      - run: cargo test --locked --example complex_construction
+      - run: cargo test --locked --release --example complex_construction
       - run: cargo run --locked --example diagram_distances
 
   msrv:
@@ -75,6 +84,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.91.0
       - run: cargo test --locked --all-features
       - run: cargo check --locked --all-targets --all-features
+      - run: cargo test --locked --example complex_construction
 
   package:
     name: Package and packaged example
@@ -85,6 +95,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo package --locked
       - run: cargo run --locked --manifest-path target/package/cocycle-0.1.0/Cargo.toml --example square
+      - run: cargo run --locked --manifest-path target/package/cocycle-0.1.0/Cargo.toml --example diagram_analysis
+      - run: cargo run --locked --manifest-path target/package/cocycle-0.1.0/Cargo.toml --example diagram_distances
+      - run: cargo run --locked --manifest-path target/package/cocycle-0.1.0/Cargo.toml --example complex_construction
+      - run: cargo test --locked --manifest-path target/package/cocycle-0.1.0/Cargo.toml --example complex_construction
 
   reference:
     name: Native C++ reference comparisons

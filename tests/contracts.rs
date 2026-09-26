@@ -299,6 +299,71 @@ fn empty_diagrams_distinguish_absent_intervals_from_uncomputed_dimensions() {
 }
 
 #[test]
+fn computed_dimensions_normalize_sets_and_handle_the_largest_dimension() {
+    use cocycle::diagram::ComputedDimensions;
+    use std::collections::BTreeSet;
+    assert!(ComputedDimensions::new(vec![]).is_err());
+    for mask in 1_u32..256 {
+        let expected: BTreeSet<_> = (0..8).filter(|d| mask & (1 << d) != 0).collect();
+        let input: Vec<_> = expected.iter().rev().flat_map(|&d| [d, d]).collect();
+        let dimensions = ComputedDimensions::new(input).unwrap();
+        assert_eq!(dimensions.iter().collect::<BTreeSet<_>>(), expected);
+        assert_eq!(dimensions.iter().count(), expected.len());
+        assert_eq!(
+            dimensions.iter().rev().collect::<Vec<_>>(),
+            expected.iter().rev().copied().collect::<Vec<_>>()
+        );
+        assert_eq!(dimensions.max(), *expected.last().unwrap());
+        for d in 0..10 {
+            assert_eq!(dimensions.contains(d), expected.contains(&d));
+        }
+    }
+    assert_eq!(
+        ComputedDimensions::new(vec![2, 0, 1, 2]).unwrap(),
+        ComputedDimensions::through(2)
+    );
+    let largest = ComputedDimensions::new(vec![usize::MAX, 0, usize::MAX - 1, usize::MAX]).unwrap();
+    assert_eq!(
+        largest.iter().collect::<Vec<_>>(),
+        [0, usize::MAX - 1, usize::MAX]
+    );
+    let all = ComputedDimensions::through(usize::MAX);
+    assert!(all.contains(usize::MAX));
+    assert_eq!(all.iter().next_back(), Some(usize::MAX));
+    assert_eq!(all.iter().take(2).collect::<Vec<_>>(), [0, 1]);
+}
+
+#[test]
+fn a_gap_is_uncomputed_even_when_below_the_maximum() {
+    use cocycle::diagram::ComputedDimensions;
+    let dimensions = ComputedDimensions::new(vec![1, 3]).unwrap();
+    let intervals = vec![essential(1, 0.)];
+    let buffer = intervals.as_ptr();
+    let diagram =
+        PersistenceDiagram::with_dimensions(dimensions.clone(), Coverage::Complete, intervals)
+            .unwrap();
+    assert_eq!(diagram.intervals().as_ptr(), buffer);
+    assert_eq!(diagram.max_dimension(), 3);
+    assert_eq!(diagram.computed_dimensions(), &dimensions);
+    assert_eq!(diagram.intervals_in_dimension(3).unwrap().count(), 0);
+    for missing in [0, 2, 4] {
+        assert!(
+            matches!(diagram.intervals_in_dimension(missing), Err(Error::DimensionNotComputed { requested, .. }) if requested == missing)
+        );
+        assert!(
+            matches!(PersistenceDiagram::with_dimensions(dimensions.clone(), Coverage::Complete, vec![essential(missing, 0.)]), Err(Error::DimensionNotComputed { requested, .. }) if requested == missing)
+        );
+    }
+    let contiguous =
+        PersistenceDiagram::new(3, Coverage::Complete, diagram.intervals().to_vec()).unwrap();
+    assert_ne!(diagram, contiguous);
+    let empty =
+        PersistenceDiagram::with_dimensions(dimensions, Coverage::Complete, vec![]).unwrap();
+    assert_eq!(empty.intervals_in_dimension(1).unwrap().count(), 0);
+    assert!(empty.intervals_in_dimension(0).is_err());
+}
+
+#[test]
 fn generic_diagrams_do_not_assume_rips_connectivity_or_births() {
     let diagram = PersistenceDiagram::new(
         1,

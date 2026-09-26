@@ -1,4 +1,4 @@
-//! Dimension-generic implicit prime-field coboundary reduction with clearing.
+//! Zero-born, dimension-generic implicit prime-field coboundary reduction with clearing.
 //!
 //! Only the current simplex dimension, pivot ownership, transformation columns
 //! and one working coboundary are retained. Reduced coboundaries are regenerated
@@ -6,14 +6,14 @@
 //! visited on demand through the shared filtration access contract.
 use crate::algebra::{PrimeField, column::Column};
 use crate::complex::Simplex;
-use crate::filtration::flag::{SimplicialAccess, next_dimension};
+use crate::filtration::simplicial::{ZeroBornSimplicialAccess, next_dimension};
 use crate::persistence::execution::WorkBudget;
-use crate::persistence::flag::{RawIntervals, union_find::UnionFind};
+use crate::persistence::{RawIntervals, union_find::UnionFind};
 use crate::{Error, Result};
 use std::collections::{HashMap, HashSet};
 
 pub(in crate::persistence) fn compute(
-    access: &impl SimplicialAccess,
+    access: &impl ZeroBornSimplicialAccess,
     max_dimension: usize,
     field: PrimeField,
     budget: &mut WorkBudget<'_>,
@@ -100,7 +100,7 @@ pub(in crate::persistence) fn compute(
     Ok(raw)
 }
 fn append(
-    access: &impl SimplicialAccess,
+    access: &impl ZeroBornSimplicialAccess,
     simplex: &Simplex,
     factor: u32,
     field: PrimeField,

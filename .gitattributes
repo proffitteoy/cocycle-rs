@@ -1,3 +1,7 @@
 * text=auto eol=lf
 *.bin -text
 benches/results/** -text -whitespace
+
+# Language statistics describe the library rather than development tooling.
+tools/** -linguist-detectable
+benches/** -linguist-detectable

@@ -15,7 +15,8 @@ behavior. Runnable Rust examples demonstrate the kernel; language bindings and
 application frameworks are not first-stage deliverables.
 
 The [GUDHI C++ study](../research/gudhi-cpp.md) maps upstream capabilities and remaining
-reading work. The [kernel design](kernel.md) proposes responsibility boundaries.
+reading work. The [kernel design](kernel.md) defines responsibility boundaries
+and distinguishes implemented changes from future extensions.
 The [Rips subsystem design](rips.md) defines the selected complete Rips target,
 including upstream Ripser, its API draft and acceptance gates. These are design
 inputs, not claims of implemented parity or a request to copy either source layout.
@@ -26,11 +27,23 @@ The implemented core provides borrowed point clouds and matrix layouts, exact
 threshold graph construction, supplied weighted flag filtrations, ordinary prime-field
 persistence through dense/sparse access, explicit simplicial expansion and
 incidence queries, requested cycle/cocycle bases, blocker-aware sparse approximation,
-owned diagrams/context and basic descriptors.
+owned diagrams/context, basic descriptors and exact bottleneck/Wasserstein distances.
 Cooperative work limits and cancellation are available on the richer compute
 entry points. An independent explicit boundary implementation remains a test oracle; the
 production representative path owns a separate reducer. The
 crate has not been published. See the [construction guide](../guides/rips-construction.md).
+
+The [filtered-complex boundary](../guides/filtered-complexes.md) is implemented:
+validated supplied simplices, a four-method cell trait, signed-scale boundary
+reduction and shared source context. This supplies an integration boundary for
+future Alpha geometry; it does not implement triangulation or Alpha construction.
+
+[Algorithm contribution paths](../development/algorithm-contributions.md) now
+include descriptor, diagram-distance and explicit construction paths,
+mathematical tests and focused checks exercised by CI. The lower-star constructor
+is a teaching example, not an additional production API. The
+[persistence algorithm walkthrough](../development/persistence-reduction.md)
+now covers direct column work, implicit alternatives and default integration.
 
 ## Next priorities
 
@@ -41,6 +54,33 @@ whole-operation execution controls follow the same contracts. Guides and native
 workers use the new paths. Legacy names and functions remain available; removing
 them requires a separately declared pre-release breaking revision. Algorithm
 optimizations and new filtration families remain separate review units.
+
+The [aligned kernel design](kernel.md) owns the dependency, ownership, result and
+extension decisions. Its [implementation sequence](kernel.md#implementation-sequence)
+has been completed locally in four steps:
+
+1. Implemented locally: reuse frozen simplicial incidence, cache structural facts,
+   and limit direct exact point edge retention to the effective analysis range,
+   without changing public result semantics.
+2. Implemented locally: common result data and computed dimensions in the explicitly
+   [declared result-API revision](kernel.md#result-api-migration), including analysis
+   consumers and equivalent source-context assembly.
+3. Implemented locally: independent owned-boundary computation, exact flag
+   dispatch and direct simplicial calls for explicit/approximate Rips. Share
+   compatible types and keep specialized public operations optional.
+4. Implemented locally: contributor guides and examples reflect the current
+   boundaries; persistence reduction has a focused check exercised by CI.
+
+These four steps are implemented locally. Diagrams support explicit computed-dimension sets;
+default builders still compute every dimension through their requested maximum.
+Current representatives remain simplicial bases. Common data supports cheap
+`AsRef` borrowing. The design specifies static cell adaptation and the scope
+of in-crate result construction. External result import, runtime plugins and
+generic cellular witnesses are separate workstreams, not prerequisites for an
+algorithm contribution. Mathematical optimizations and legacy-API removal also
+remain separate changes.
+
+The broader Rips capability and evidence priorities remain:
 
 1. **Complete the Rips subsystem.** Follow the
    [delivery sequence and exit gates](rips.md#delivery-sequence-and-exit-gates):

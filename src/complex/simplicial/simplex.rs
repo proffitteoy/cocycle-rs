@@ -11,6 +11,29 @@ pub struct Simplex {
     pub(crate) value: f64,
 }
 impl Simplex {
+    /// Create a nonempty simplex with strictly increasing vertex IDs.
+    /// Negative finite filtration values are allowed; no faces are inserted.
+    /// # Errors
+    /// Rejects empty, repeated/unsorted vertices and nonfinite values.
+    pub fn new(vertices: Vec<usize>, value: f64) -> crate::Result<Self> {
+        if vertices.is_empty() || vertices.windows(2).any(|p| p[0] >= p[1]) {
+            return Err(crate::Error::InvalidComplex {
+                cell: None,
+                reason: "vertices must be nonempty and strictly increasing",
+            });
+        }
+        if !value.is_finite() {
+            return Err(crate::Error::NonFiniteValue {
+                field: "filtration value",
+                index: None,
+            });
+        }
+        Ok(Self {
+            vertices,
+            value: crate::canonical_zero(value),
+        })
+    }
+
     /// Increasing original vertex indices.
     pub fn vertices(&self) -> &[usize] {
         &self.vertices
@@ -19,7 +42,7 @@ impl Simplex {
     pub fn dimension(&self) -> usize {
         self.vertices.len() - 1
     }
-    /// Filtration entry value, in the input's distance units.
+    /// Filtration entry value, in the source's declared units.
     pub fn value(&self) -> f64 {
         self.value
     }

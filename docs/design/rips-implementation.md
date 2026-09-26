@@ -1,5 +1,11 @@
 # Rips implementation scope
 
+
+Module paths below record the Rips implementation stages. The later filtered-cell
+boundary moved shared access and representatives into simplicial modules; consult
+[current architecture](../development/architecture.md) for current locations and
+[filtered complexes](../guides/filtered-complexes.md) for the public contract.
+
 [Documentation](../README.md) / Design
 
 Status: staged implementation map, recorded 2026-09-20. This file makes the

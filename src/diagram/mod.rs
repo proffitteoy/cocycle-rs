@@ -5,8 +5,13 @@
 //! general nonnegative integers and scales may be negative. Rips-specific facts
 //! such as zero-dimensional births at zero belong to the Rips computation.
 
+mod data;
+mod dimensions;
 mod interval;
 mod persistence_diagram;
+
+pub use data::PersistenceData;
+pub use dimensions::ComputedDimensions;
 
 pub use crate::filtration::{Coverage, FiltrationKind};
 pub use interval::{IntervalEnd, PersistenceInterval};

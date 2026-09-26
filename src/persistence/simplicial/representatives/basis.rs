@@ -4,17 +4,50 @@ use crate::algebra::column::Column;
 use crate::diagram::{
     Coverage, PersistenceDiagram, Representative, RepresentativeKind, RepresentativeTerm,
 };
-use crate::filtration::flag::SimplicialAccess;
+use crate::filtration::simplicial::ZeroBornSimplicialAccess;
 use crate::persistence::{PersistenceOptions, assemble_diagram, execution::WorkBudget};
 use crate::{Error, Result};
 
-pub(in crate::persistence::flag) fn compute(
-    access: &impl SimplicialAccess,
+pub(in crate::persistence) fn compute(
+    access: &impl ZeroBornSimplicialAccess,
     options: &PersistenceOptions,
     requests: &[RepresentativeRequest],
     coverage: Coverage,
     budget: &mut WorkBudget<'_>,
 ) -> Result<(PersistenceDiagram, Vec<Representative>)> {
+    validate(options, requests, coverage)?;
+    let field = options.field();
+    let (simplices, reduction) =
+        complex::reduce(access, options.max_homology_dimension(), field, budget)?;
+    finish(simplices, reduction, options, requests, coverage, budget)
+}
+pub(in crate::persistence) fn compute_explicit(
+    source: &crate::complex::SimplicialComplex,
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    coverage: Coverage,
+    budget: &mut WorkBudget<'_>,
+) -> Result<(PersistenceDiagram, Vec<Representative>)> {
+    validate(options, requests, coverage)?;
+    let input = super::super::input::read(source, options, budget)?;
+    let mut simplices = Vec::new();
+    simplices
+        .try_reserve_exact(input.cells.len())
+        .map_err(|_| allocation())?;
+    for &id in &input.cells {
+        budget.step()?;
+        // IDs came from this same borrowed immutable source.
+        simplices.push(source.simplex(id).unwrap().clone());
+    }
+    let reduction =
+        crate::algebra::reduction::reduce(input.columns, options.field(), &mut || budget.step())?;
+    finish(simplices, reduction, options, requests, coverage, budget)
+}
+fn validate(
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    coverage: Coverage,
+) -> Result<()> {
     for (index, request) in requests.iter().enumerate() {
         if request.dimension > options.max_homology_dimension() {
             return Err(Error::DimensionNotComputed {
@@ -32,9 +65,17 @@ pub(in crate::persistence::flag) fn compute(
             });
         }
     }
+    Ok(())
+}
+fn finish(
+    simplices: Vec<crate::complex::Simplex>,
+    reduction: crate::algebra::reduction::BoundaryReduction,
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    coverage: Coverage,
+    budget: &mut WorkBudget<'_>,
+) -> Result<(PersistenceDiagram, Vec<Representative>)> {
     let field = options.field();
-    let (simplices, reduction) =
-        complex::reduce(access, options.max_homology_dimension(), field, budget)?;
     let mut records = Vec::new();
     for (birth, simplex) in simplices.iter().enumerate() {
         budget.step()?;

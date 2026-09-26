@@ -1,367 +1,412 @@
-# Rust TDA kernel design direction
+# Rust TDA kernel design
 
 [Documentation](../README.md) / Design
 
-Status: design direction, recorded 2026-09-20. The current source boundaries are
-documented in the [architecture](../development/architecture.md). Additional
-capabilities and API proposals here are not supported features or a delivery schedule.
+Status: adapter/resource corrections, the result-API revision, algorithm-boundary
+cleanup and the reduction contributor walkthrough are implemented locally.
+This page defines the
+intended responsibilities, type boundaries and implementation sequence.
+[Current architecture](../development/architecture.md) and rustdoc describe
+the code; the [roadmap](roadmap.md) owns delivery priorities.
 
 ## Objective and scope
 
-Build a native Rust topological data analysis kernel, using GUDHI's C++ capability
-set and Ripser's specialized computation as reference points. The primary product
-is a Rust library with runnable analysis examples. Bindings, a CLI, hosted
-services, and a dataframe/query engine are not first-stage deliverables.
+Build a native Rust TDA library with runnable analysis examples. Use GUDHI's C++
+capabilities and Ripser's specialized computation as mathematical and algorithmic
+references. Researchers should implement their algorithms without adopting a
+project-wide execution protocol or learning unrelated construction families.
 
-"Modern data analysis" means observable data contracts, predictable ownership,
-composable operations, clear resource behavior, and reproducible results.
-Mathematical definitions and proofs remain essential; usability must expose their
-assumptions rather than obscure them.
+The design shares mathematical meaning, data access and useful implementation
+facilities. Algorithms retain their representations, preparation, ordering and
+working state. Ownership, conversion costs, output interpretation and unsupported
+cases must be explicit. A CLI, bindings, dataframe integration and hosted services
+remain separate from this kernel work.
 
-The [GUDHI study](../research/gudhi-cpp.md) records source observations. The
-[architecture](../development/architecture.md) and [guide](../guides/rips.md) remain authoritative for
-current behavior. The [roadmap](roadmap.md) selects the next work. The
-[complete Rips subsystem design](rips.md) specializes this direction into the
-selected Rips capability matrix, API draft and acceptance gates.
+This revision keeps one crate and the existing domain directories. There is no
+planned engine registry, universal algorithm trait, mandatory directory split or
+empty Alpha/cubical scaffold. New types below serve specific result semantics;
+they are not a requirement for every mathematical operation.
 
-## Starting point
+## Current behavior and planned changes
 
-The [Rips guide](../guides/rips.md) describes the implemented input, persistence,
-diagram, and descriptor contracts. This design builds on those contracts.
+| Area | Implemented today | Decision for this revision |
+| --- | --- | --- |
+| Persistence algorithms | Specialized H0 and F2 H1, implicit higher-dimensional prime-field cohomology, generic boundary reduction | Preserve independent implementations and their applicable optimizations |
+| Explicit storage | Immutable, validated simplices with oriented incidence; signed values and unequal vertex births | Reuse construction guarantees and inexpensive structural metadata |
+| Default API | Sealed `PersistenceExt`, Builder requests and private dispatch | Keep the default facade controlled; algorithms remain independently callable internally |
+| Generic cells | Open four-method `FilteredComplex` with iterator-returning methods | Keep it an optional static generic adapter, not a universal algorithm interface |
+| Results | `PersistenceResult` composes common `PersistenceData` with optional simplicial representatives | Compatible specialized outputs reuse the common data |
+| Computed dimensions | Explicit nonempty sets; default builders still compute `0..=q` | Consumers check membership; maximum alone is insufficient |
+| Execution | Cooperative budgets/cancellation across Builder terminals; documented legacy exceptions | Preserve scopes; keep controls independent of mathematical source data |
+| Other domains | Alpha and cubical construction are not implemented | Define extension boundaries without adding placeholder implementations |
 
-Important existing limits:
-
-- The legacy point API and unrestricted richer point calls materialize a dense
-  condensed buffer; finite-cutoff richer calls stream a threshold graph.
-- The specialized H1 path uses compact edge/triangle indexing. Higher-dimensional
-  and odd-prime requests use tuple-indexed implicit cohomology and clearing; apparent/emergent
-  pair shortcuts remain specialized to H1.
-- Legacy `RipsOptions` admits H0/H1; `PersistenceOptions` accepts arbitrary
-  dimensions. Frozen explicit simplicial expansion is available. There is no
-  public general boundary-reducer API or cubical computation. Prime fields are
-  validated explicitly; a private forward reducer serves requested representatives.
-- Richer results now add exact-Rips/supplied-flag context and coefficient field.
-  Representatives now carry original simplex vertices, coefficients and interval
-  identities. Approximation metadata remains unimplemented.
-- Intervals permit signed scales; the existing Betti-curve grid deliberately
-  permits only nonnegative values. Scalar-field support must address that mismatch
-  explicitly.
-- Cooperative work limits and cancellation exist for persistence. Construction
-  is not covered by those controls; no batch scheduler or hard RSS limit exists.
-- The current source is not a workspace of separate kernel/adapter crates.
-
-These limits must remain visible while the project grows.
+The existing core is not universally routed through one reducer. The first step
+addresses particular adapters: redundant validation of immutable input, repeated
+structural scans and unnecessary exact-Rips edge retention.
+They do not establish a mathematical defect in the filtered-cell contract.
 
 ## Design decisions
 
-### Data-oriented entry points with explicit mathematical meaning
+### Dependency and type design
 
-Public operations should begin with the data that callers have: points,
-dissimilarities, a filtered graph, scalar samples, or a grid. Users should be
-able to compute a result without first assembling internal containers.
+| Component | Responsibility | Dependency boundary |
+| --- | --- | --- |
+| Geometry and complex data | Coordinates, distances, topology, incidence and filtration values | No persistence requests, dispatch or reducer working state |
+| Filtration construction | Construct the mathematical source and establish its source-specific guarantees | Does not invoke persistence merely to produce an explicit complex |
+| Algorithm implementation | Required access, preparation, parameters, workspace and mathematical output | Uses domain data and selected algebra/execution tools; does not depend on the default Builder or its dispatch |
+| Default API adapter | Interpret the request and select a compatible implementation | Calls algorithms; algorithms do not call back into default dispatch |
+| Result and analysis | Own interpreted outputs and derive measurements from compatible data | Analysis does not depend on the producing algorithm |
 
-Operation-specific options specify mathematical intent: homology dimensions,
-coefficient field, scale cutoff, filtration convention, or approximation
-parameters. Resource controls are a separate concern.
-
-Point normalization, deduplication, sampling, and time-delay embedding are
-explicit transformations. A point-cloud call must not silently preprocess data
-or select a cheaper mathematical problem.
-
-"Distance" must not silently imply the triangle inequality: existing symmetric
-dissimilarities deliberately need not be metrics. Algorithms requiring a metric
-must state how that precondition is established; checking every triangle is not
-a free default.
-
-### Separate input, representation, computation, and result
-
-The logical dependency direction is:
+The implementation routes are:
 
 ```text
-validated input views
-    -> operation-specific construction / access
-    -> algorithm with private working state
-    -> owned mathematical result
-    -> descriptors, representations, and distances
-
-explicit complex builders -> frozen incidence/filtration access -> reducer
-
-execution controls and diagnostics accompany a computation;
-they do not define the topology of its input.
+default Builder -> source adapter -> algorithm function -> mathematical output
+optional specialized entry ------> algorithm function -> mathematical output
 ```
 
-A result-only operation cannot depend on an input point cloud, simplex container,
-or reducer state. Geometry must not depend on persistence. A shared algebra
-component must not import a Rips-specific filtration.
+These are responsibility boundaries, not mandatory materialized stages. A direct
+persistence algorithm may interleave geometric access, construction and reduction.
+It need not first build a generic complex. An explicit construction operation
+remains independently callable.
 
-Builders may be mutable; a computation should borrow a stable read-only input
-or snapshot. Cache preparation can occur before freezing. Pivot ownership,
-union-find, annotations, and change-of-basis columns belong to a computation or
-explicit reusable workspace, not hidden fields in the caller's complex.
+Ordinary algebra components do not import geometry, source context or diagram
+assembly. Use private working indices where index spaces differ; an internal
+integer is not a universal public cell identity. Local helpers stay with their
+algorithm until their shared semantics justify reuse.
 
-A workspace may retain capacity between calls, but logical state must be reset.
-It must not retain invalid input references or leak results from the previous
-sample.
+### Algorithm implementations and default integration
 
-### Multiple representations and algorithms
+An implementation may support a specified subset of fields, dimensions or inputs.
+It need not implement every default Builder option. Unsupported requests are
+explicit; automatic selection cannot silently weaken the requested guarantee.
 
-Retain distinct execution paths where the problem warrants them:
+Independent algorithms can reuse the same parameter and result types. Clearing,
+enumeration and column-storage alternatives can remain private. A specialized
+public entry point is appropriate when users need a meaningful algorithm choice,
+different parameters or a different mathematical operation. Neither a new public
+function nor a new options type is required for every internal implementation.
 
-| Path | Suitable representation | Reusable boundary |
-| --- | --- | --- |
-| Rips persistence | Dense distances or a declared filtered graph; implicit simplices/cofacets | Validated input and ordinary diagram semantics |
-| Scalar function on a line | Borrowed scalar samples and dedicated scan | Ordinary diagram semantics |
-| Cubical persistence | Grid shape/values and arithmetic incidence | Boundary access where useful; specialized algorithms remain possible |
-| Explicit simplicial persistence | Stored simplices with validated filtration | Ordered boundary columns and algebra |
-| Zigzag, later | Validated insertion/deletion events | Selected matrix operations; distinct interval semantics |
-| Cover/nerve analysis, later | Covers, memberships, and graph structure | Graph/complex results, not forced into persistence diagrams |
+`FilteredComplex` serves boundary-based consumers; `ZeroBornSimplicialAccess`
+serves the existing zero-born coface algorithms. Other algorithms need not adopt
+either contract. Sharing union-find mechanics, for example, does not imply sharing
+a pairing rule for arbitrary vertex births. Share arithmetic and access only when
+domains, ordering, overflow behavior and costs agree.
 
-A Simplex tree implementation is optional. The first explicit simplicial
-representation can be simpler if it meets actual construction, lookup, and
-traversal needs. Do not materialize a Rips complex solely to share that storage.
+### Ownership and execution
 
-Introduce narrow internal traits when a concrete second consumer makes their
-requirements clear. Potential contracts include distance access, ordered
-boundary-column access, and cofacet generation. They are not one universal
-`Complex` trait. An implicit enumerator need not expose a cheap total cell count,
-mutable insertion, or random access to every simplex.
+Use a borrow when an operation only needs access, and an owned argument when it
+needs ownership. Avoid borrowing merely to clone immediately. Stable borrowed
+sources remain unmodified; consuming algorithms may own mutable working data.
+Pivots, transformation columns, annotations and union-find state belong to the
+computation or an explicit workspace.
 
-Use private newtypes where mixing index spaces is a realistic error, for example
-a filtration position versus a combinatorial simplex ID. Do not expose a
-representation's integer IDs as a universal public cell identity.
+Builders configure operations; small mathematical functions need no Builder.
+Reusable construction requests may borrow input, while a one-shot stateful
+callback may require a consuming terminal. These choices follow ownership rather
+than a universal Builder convention.
+
+Each controlled public terminal creates one cooperative budget and passes it
+through internal composition. An internal call does not reset the budget.
+Cancellation cannot interrupt arbitrary user callbacks, allocation or sorting.
+Work counts are algorithm work, not milliseconds or bytes; no hard deadline,
+process-RSS bound or recovery from every allocation failure is promised.
+
+A reusable workspace may retain capacity but resets logical state and cannot
+keep stale input references. Preserve `Send`/`Sync` where the data permits them;
+do not require thread-safety bounds on every algorithm in anticipation of future
+parallelism. Batch use starts with ordinary iteration. A future scheduler must
+define ordering, failure behavior and concurrency separately.
+
+### Extension boundaries
+
+| Extension surface | Policy |
+| --- | --- |
+| Default `.persistence()` facade | Sealed and library-controlled |
+| External filtered-cell storage | Open `FilteredComplex` implementation with the documented mathematical contract |
+| In-crate algorithm contribution | Reuse internal facilities and expose a focused operation when useful |
+| Runtime-selected implementations | Separate future adaptation at the selection boundary |
+| Stable external algorithm/plugin API | Outside this revision; internal reducers and budgets are not promised stable |
+
+The current `FilteredComplex` returns `impl Iterator` from trait methods and is
+not `dyn` compatible. Its intended use is static generic dispatch. Do not box
+every cell iterator or impose dynamic dispatch solely to prepare for hypothetical
+plugins. Static external type adaptation and runtime plugin loading are different
+capabilities.
+
+An algorithm needing an additional access operation can define a suitably narrow
+interface without enlarging every existing complex's obligations. The module
+organization stays domain-based; implementation details remain private. Public
+trait bounds are placed where needed rather than propagated through every type.
+
+### Source facts and result assembly
+
+| Fact | Authority |
+| --- | --- |
+| Source identity, construction settings, scale convention, vertex mapping and approximation hypotheses | Source or constructor |
+| Available source scale and skeleton coverage | Construction evidence |
+| Requested field, analysis range and outputs | Operation request |
+| Computed dimensions, intervals and established coverage | Computation using source evidence and the request |
+
+Equivalent entry points for a source family reuse a private assembly function
+with these facts. Direct computation carries them without materializing a complex;
+prepared and explicit routes use stored facts. Assembly produces interpreted
+result data, not an execution plan or an algorithm driver.
+
+Temporary retention thresholds, cone stopping bounds and working indices do not
+overwrite requested settings. A completeness proof may establish output coverage;
+an unexplained internal stop cannot. A new filtration family owns its own
+interpretation rather than modifying Rips rules to describe itself.
+
+Legacy APIs with deliberately different context or budget semantics use explicit
+compatibility adapters. They are not silently treated as equivalent new routes.
+
+### Validation and preparation
+
+The private ingestion paths are distinct:
+
+- `&SimplicialComplex`: use immutable construction guarantees for uniqueness,
+  face closure, ordering and oriented incidence. Select needed cells and convert
+  coefficients without repeating external validation.
+- `&impl FilteredComplex`: validate the supplied traversal and selected
+  boundaries under the existing selected-field validation contract.
+
+Both can feed the existing boundary reducer. An algorithm that does not consume
+boundary columns bypasses both. No public trust flag or unchecked escape hatch
+selects a fast path. Cache cheap structural facts during construction instead of
+rescanning all simplices for each query.
+
+Requested construction range, source coverage and analysis range remain distinct.
+A direct exact-Rips query can retain fewer edges when its analysis cap is lower,
+without changing source metadata or skipping required distance validation.
+Preparation for sparse approximation may need information beyond the analysis
+range; sampling, mappings, hypotheses and high-dimensional blockers remain local
+to that algorithm. Common range meaning does not prescribe a common preparation
+sequence.
 
 ### Results carry enough information to be interpreted
 
-Preserve owned diagrams and existing endpoint distinctions. Introduce computation
-context alongside results when needed, without turning the basic interval
-container into an engine-specific object.
+`PersistenceData` owns a `PersistenceDiagram` and
+`ComputationContext`, with private fields and borrowed `diagram()`/`context()`
+access. It contains no representatives or engine state. Computed dimensions and
+established coverage live in the diagram; source facts, coefficient field and
+requested range live in the context.
 
-Richer Rips calls now return owned computation context; see the
-[construction guide](../guides/rips-construction.md) and
-[approximation guide](../guides/sparse-rips.md). Preserve this separation for
-future filtrations. Their ordinary-persistence records should be able to state:
+The existing `PersistenceResult` composes this data with its optional simplicial
+representatives and retains delegating accessors. Compatible specialized results
+compose the same data with their own typed auxiliary output. Diagram-only
+operations can return the common data directly. Operations with different interval
+semantics use their own results.
 
-- Computed dimensions and coefficient field.
-- Filtration family and scale convention, including squared versus unsquared
-  quantities and any explicit preprocessing.
-- Coverage and endpoint convention.
-- Whether the computation is exact for the supplied filtration or has a declared
-  approximation guarantee, including its hypotheses and parameters.
-- Optional diagnostics and reproducibility information, such as sampling seed
-  and implementation version.
+Existing representatives retain their persistent-cycle and dual-cocycle guarantees.
+A cellular cycle or an independently obtained cocycle must not be forced into
+that type. Its output specifies cell identity/lifetime, orientation, field,
+query scale and any interval association actually established. Witness identities
+refer to the final owning diagram; projection or reordering must explicitly
+remap associations. Shared access does not permit changing the diagram beneath
+its witnesses.
 
-Mathematical context is distinct from optional telemetry: an algorithm name is
-useful provenance, but a diagram's validity must not depend on one engine name.
+#### Borrowing and conversion costs
 
-Finite scalar-field levels can be negative. Rips retains its own nonnegative
-distance contract. Numerical policies for NaN, infinity, masks, overflow, and
-signed zero belong to each input/result domain; do not use a finite-distance
-validator for every scalar field.
+Compatible wrappers and `PersistenceData` itself implement
+`AsRef<PersistenceData>` by borrowing already stored data. This conversion is
+infallible and performs no allocation, copying, sorting, validation or context
+assembly. It is not a mathematical compatibility certificate.
 
-For future masked grids, model exclusion explicitly or document a precise
-extended-value convention. Do not accidentally reinterpret a missing sample as
-a large finite value.
+Context-aware analysis uses a thin generic entry that borrows the common data,
+then calls concrete internal computation functions. Raw-diagram operations
+retain their narrower contract. Specialized results do not have to discard
+context to reuse field/scale checks. Expensive or fallible representation changes
+use explicit methods or appropriate conversion traits instead of `AsRef`.
 
-Representatives are optional outputs with explicit ownership and input mappings.
-A representative cycle, a cocycle, and a persistence pair are different objects.
-Computing representatives must not become an unavoidable cost for diagram-only
-callers. When preprocessing changes the complex, explain how witnesses map back.
+This adapter supports results containing the common data; it does not promise
+zero-copy interoperability with every external representation. A distinct
+borrowed view can be designed if an actual storage family needs it.
 
-Ordinary persistence, extended persistence, and zigzag may need different interval
-types. A shared output philosophy does not justify flattening incompatible
-mathematical semantics.
+#### Computed dimensions
 
-### Failure, coverage, and approximation are independent
+`ComputedDimensions` represents a nonempty set of dimensions actually computed.
+Its public contract is membership, iteration and maximum; its storage is private.
+Normalized inclusive ranges are an implementation option, not a public layout
+promise. An empty interval list in a computed dimension differs from an
+uncomputed dimension.
 
-A caller cutoff defines a restricted mathematical computation. Cancellation or
-an exhausted resource budget defines an unsuccessful execution. They cannot
-share a generic "incomplete" flag.
+`PersistenceDiagram::new(q, ...)` keeps contiguous `0..=q` construction.
+`ComputedDimensions::new` normalizes an explicit list; `through(q)` creates the
+contiguous set without enumerating it. `PersistenceDiagram::with_dimensions`
+accepts the declared set, exposed by `computed_dimensions()`. Every interval belongs to
+the declared set. Dimension-specific descriptors and distances reject uncomputed
+dimensions. An operation over all dimensions requires matching sets or an
+explicitly selected common domain; it never silently intersects away requested
+information.
 
-Initially, interrupted computations should return a typed error and no public
-diagram, consistent with current failure behavior. Certified partial results
-would require a separate explicit contract and proof of the completed range;
-arbitrary intermediate pairs do not constitute a valid censored diagram.
+#### Result construction and external integration
 
-Similarly, keep these operations distinct:
+This revision creates complete common data through in-crate source assemblers.
+External callers can still construct raw diagrams under the existing API.
+Wrapping a library-produced `PersistenceData` does not open arbitrary context
+construction or algorithm registration.
 
-| Operation | Meaning |
-| --- | --- |
-| Exact threshold graph | All required edges through a declared scale are available |
-| Arbitrary sparse weighted graph | Its own flag filtration; no implied equivalence to the original dense Rips filtration |
-| Sparse Rips approximation | A changed filtration with a stated approximation theorem and applicable assumptions |
-| Subsampling | A changed dataset with selected indices and parameters |
-| Persistence-preserving collapse | A transformation with a specific preservation guarantee |
+Private fields protect representation and invariants; they do not imply that
+all constructors must remain private forever. A future public result-import API
+must distinguish caller-declared metadata from construction-established source
+guarantees. Structural checks cannot prove that an external algorithm computed
+the diagram correctly or establish a Rips approximation theorem. No import API
+may silently confer such a certificate. That boundary is separate from a stable
+external reducer API and is not implemented by this revision.
 
-Do not infer complete coverage of the original dense filtration from the largest
-stored edge in a sparse input. Edge-list validation alone cannot certify that
-all edges below a cutoff were supplied; the API must distinguish a supplied graph
-from a construction with that guarantee.
+### Result API migration
 
-### Resource behavior and batch composition
+This is an implemented pre-release breaking revision. Previously,
+`max_dimension()` promised that every lower dimension was computed. It now returns
+the greatest member of a possibly noncontiguous set; its Rust signature is
+unchanged, but its semantics differ. Migrate callers as follows:
 
-For dense points, report or document the known distance storage cost
-`n * (n - 1) / 2 * size_of::<f64>()`, with checked arithmetic. This is not the
-full memory estimate: edge sorting, indices, heaps, and reduction fill-in add
-costs that can dominate.
+1. Add membership and iteration. Replace availability checks and applicable
+   `0..=max_dimension()` loops, and update dimension-error diagnostics.
+2. Preserve contiguous construction and existing default Builder request meaning.
+   Document the new maximum as an upper bound, not proof of membership.
+3. Introduce common result data and compose existing results around it. Generalize
+   context-aware entry points while preserving field/scale checks. Include
+   function-pointer and type-level signature changes in the migration statement.
+4. Update rustdoc, guides, examples and maintained callers together.
 
-Resource controls should use quantities the implementation can actually enforce:
-tracked work-buffer bytes, generated-entry counts, or cooperative cancellation
-checkpoints. An internal allocation budget is not a hard bound on process RSS.
-All tracked buffers and transient reallocations need a defined accounting policy
-before advertising such a limit. Do not promise recovery from every OOM.
+Use `diagram.computed_dimensions().contains(k)` for availability and
+`diagram.computed_dimensions().iter()` for traversal. `DimensionNotComputed` keeps
+its `computed_max` field as an upper bound, including errors for gaps below it.
+No current public operation implicitly combines all dimensions; future ones must
+require matching domains or explicit selection.
 
-Begin batch usage with ordinary Rust iteration over the single-sample API.
-A dedicated batch API becomes justified by reusable workspaces, bounded
-concurrency, or per-sample error reporting in real examples.
+The three context-aware distance functions now accept independent generic types
+`L, R: AsRef<PersistenceData> + ?Sized`. Ordinary calls with two
+`PersistenceResult` values still work. Function-pointer annotations select concrete
+operand types; explicit specialization can use
+`bottleneck_distance_results::<PersistenceResult, PersistenceResult>`.
+`PersistenceResult::into_data` discards representatives while preserving context;
+`into_parts` moves both without changing interval associations. Full-result import
+remains crate-internal.
 
-When added, batch execution should preserve sample identity and deterministic
-result ordering, specify fail-fast versus per-sample failure, bound in-flight
-memory, and avoid nested uncontrolled thread pools. No global mutable runtime is
-needed. Async is not a prerequisite for a CPU computation library.
+This migration does not remove legacy
+construction APIs or change their documented context and budget scope.
 
-Determinism claims should specify their scope. Tie policies and random seeds can
-be stable while floating-point results still vary across numerical kernels or
-platforms.
+## Mathematical and resource boundaries
 
-### Analysis representations are first-class kernel operations
+Keep the following distinctions in both types and operation contracts:
 
-Prioritize capabilities that turn diagrams into comparable measurements:
+- Exact threshold Rips, an arbitrary supplied flag graph, sparse approximation,
+  subsampling and persistence-preserving simplification have different guarantees.
+  A sparse graph's largest edge does not prove original-source coverage.
+- A finite analysis cutoff restricts the mathematical question. Cancellation and
+  budget exhaustion return execution errors, not a successful partial diagram.
+- Filtration scale convention, physical units and metric validity are distinct.
+  Radius, squared radius and edge length cannot be substituted implicitly.
+- Input preprocessing is explicit. Do not silently normalize, deduplicate, sample
+  or replace a nonmetric dissimilarity by a metric.
+- Signed filtrations remain valid where supported; NaN, infinity, masking and
+  numeric policies belong to each domain. Missing cells are not large finite values.
+- Representatives are optional and need not be computed for diagram-only results.
+  Different valid bases are not required to have identical coefficients.
+- Shared output shape does not equate ordinary, extended and zigzag persistence.
 
-- Betti curves on a declared grid and dimension.
-- Lifetime/entropy summaries with explicit treatment of non-finite lifetimes.
-- Grid landscapes or another precisely specified vector representation.
-- Diagram distances with a defined supported endpoint domain.
+Analysis operations consume the required result data directly. Feature grids,
+bandwidths, dimension selection and endpoint policies must agree across samples.
+Matching distances retain their [supported endpoint and context contracts](../reference/mathematics.md#16-diagram-matching-distances).
+These rules do not add a dataframe, plotting or asynchronous runtime dependency.
 
-Representations evaluated for multiple samples must share grid, bandwidth,
-dimension ordering, and endpoint policy. If parameter fitting is added, freeze
-the fitted configuration for new data; do not silently refit each sample or use
-held-out data to choose a feature grid.
+Document representation costs, including dense pairwise storage, retained edges,
+incidence, conversion and reduction fill-in. An allocation counter is not a hard
+RSS limit. Deterministic work counters diagnose implementation costs but are not
+cross-algorithm performance units.
 
-For an initial finite-diagram distance implementation, reject unsupported
-essential/censored intervals or require an explicitly named projection. Never
-drop them silently. Numerical approximation tolerances must be documented
-separately from filtration coverage.
+## Future capability placement
 
-These operations can expose ordinary slices, iterators, and owned arrays.
-Arrow, Polars, ndarray, serialization, and plotting adapters are candidates for
-separate optional integration, not requirements for the core API. None is
-selected or implemented here.
+The [current architecture](../development/architecture.md) owns the source tree.
+The table describes responsibility, not new directories to create now.
 
-## Extension boundaries
-
-Keep one crate initially. A workspace becomes worthwhile when a real integration
-has different dependencies, release needs, or compilation costs.
-
-The [current architecture](../development/architecture.md) owns the implemented
-source tree, dependency direction, and component responsibilities. Follow the
-[file and dependency rules](../development/conventions.md#file-and-dependency-boundaries)
-when adding code. The map below locates future capabilities; it does not announce
-new public namespaces or require empty directories.
-
-### Where future capabilities belong
-
-Matrix layouts, frozen simplicial storage, prime-field algebra, owned computation
-context and cooperative execution controls are already implemented. Their current
-locations belong in the architecture page. The remaining map identifies future
-ownership; create files only with concrete consumers, not one file per class.
-
-| Concrete addition | Likely home | Boundary to preserve |
+| Capability | Reusable parts | Capability-specific responsibility |
 | --- | --- | --- |
-| Additional input layouts or separate spatial operations | Named files within the existing `geometry/` directory | Re-export existing types; internal storage stays private |
-| Scalar-line persistence | `persistence/line.rs` initially | Borrow samples; keep its ordering and workspace out of Rips |
-| Cubical topology and values | `complex/cubical/` | Grid incidence and validated data are distinct from reduction state |
-| Cubical filtration access, when needed separately | `filtration/cubical.rs` | Adapt the grid; do not duplicate the grid or its incidence implementation |
-| Cubical persistence | `persistence/cubical.rs` or a directory when needed | Select or implement a reducer without routing through simplex storage |
-| General ordered boundary access for another consumer | Extend existing `algebra/reduction/` with a demonstrated access contract | Preserve independence from any concrete complex |
-| Landscapes or persistence images | Add named operation files to `descriptors/` | Consume diagrams only; share validated feature configurations when semantics agree |
-| Diagram matching distances | `diagram_distances/{mod,bottleneck}.rs` initially | Keep diagram matching separate from geometric point distances |
-| Context for another filtration family | Extend `diagram` or use an operation-owned result wrapper | Preserve engine-independent mathematical interpretation |
-| Hard resource limits or reusable workspaces beyond current cooperative controls | Feature-local first; `execution/` only for actual shared policy | Controls do not alter mathematical input or silently change the algorithm's guarantee |
+| Alpha construction | Explicit simplicial storage and compatible persistence/result analysis | Predicates, triangulation, degeneracies, filtration values and radius conventions |
+| Cubical topology and persistence | Optional filtered-cell access, suitable algebra, compatible results | Grid representation, arithmetic incidence and specialized computation |
+| Additional persistence algorithm | Relevant access, field/column operations and interpreted outputs | Ordering, preparation, reduction, workspace and optional witnesses |
+| Diagram descriptors and metrics | Diagram/result contracts and meaningful numerical helpers | Formula, endpoint support and derived representation |
+| Scalar-line persistence | Compatible ordinary results | Direct scalar algorithm without mandatory complex construction |
+| Zigzag, cover/nerve or reconstruction | Applicable local primitives | Event, graph or geometric output semantics; no forced ordinary-diagram conversion |
 
-For example, adding a landscape should not require changes to filtration or
-persistence. Adding a cubical input should not alter Rips internals. Adding a new
-reducer may require an adapter, but should not require rewriting every complex.
-These change-impact checks are more useful than counting directories.
+Pure Rust geometry requires appropriate predicates and numerical algorithms, not
+only translated formulas. New coefficient domains similarly require their own
+algebraic semantics. Future capabilities do not weaken the selected
+[Rips scope](rips.md#required-capability-matrix) or imply current GUDHI parity.
 
-### Reuse policy
+## Implementation sequence
 
-Reuse has different levels. Prefer shared mathematical results and data contracts
-before attempting to share every algorithm's internal representation.
+Step 1 is implemented: frozen simplicial storage caches structural facts; the
+private `persistence/simplicial/input.rs` reader converts selected stored incidence
+without repeating external-cell validation; direct exact point analysis retains
+only edges within both caps. Public signatures and result semantics are unchanged.
+External `FilteredComplex` validation remains in `persistence/filtered.rs`.
+Approximate Rips preparation is unchanged because its sampling and blocker rules
+need separate analysis.
 
-| Candidate | Decision and ownership |
-| --- | --- |
-| Validated point/dissimilarity views | Already shared through `geometry`; no validation copies in each public entry point |
-| Owned intervals and coverage | Shared through `diagram`; interpretation is independent of reducer storage |
-| Ordinary interval assembly | One production normalization path; retain separate contract tests for it |
-| Union-find for current Rips H0/H1 | Shared within `persistence::flag`; preserve allocation/error semantics |
-| Flag ordering and cofacet generation | Owned by `filtration::flag`; algorithm workspaces do not define a second order |
-| Combinatorial arithmetic | Extract only if callers agree on domains, overflow behavior, and index convention; similar formulas alone are insufficient |
-| Sparse columns and field arithmetic | Share across production algorithms only when the algebraic/storage contract and measured cost agree |
-| Small allocation/error helpers | Keep local until genuinely shared; do not create a catch-all `utils` module |
-| Explicit reference reducer | Keep mathematically independent from production; sharing output formatting does not justify sharing the algorithm under test |
+Step 2 is implemented: `diagram/dimensions.rs` and `diagram/data.rs` own the new
+contracts; internal source adapters share result/context assembly; descriptors
+and distances respect dimension membership; context-aware distances accept
+borrowed common data. The migration, architecture, contributor guidance and
+diagram example are synchronized.
 
-Two consumers are evidence to investigate reuse, not proof that a common trait
-is appropriate. In particular, an H0 algorithm with nonzero vertex births may
-need an elder-rule representative separate from the union-find root; sharing
-connectivity mechanics must not silently share an invalid pairing policy.
+Steps 3–4 are implemented. `persistence/boundary` owns selected column input and
+diagram computation independently of external filtered-cell validation. Exact
+flag selection lives in `flag/dispatch.rs`; explicit/approximate Rips call
+simplicial algorithms directly. The shared optional-representative policy for
+zero-born access lives in `simplicial::finish_zero_born`. Algorithms remain free
+to use their own preparation, access and outputs. No new algorithm registry or
+public selection API was needed. The
+[reduction walkthrough](../development/persistence-reduction.md) and its focused
+CI check cover direct mathematical work followed by source integration.
 
-## Capability sequence and acceptance gates
-
-The selected first workstream is the [complete Rips subsystem](rips.md), including
-inputs, explicit and implicit construction/access, higher-dimensional computation,
-prime fields, representatives and sparse approximation. Its
-[delivery sequence](rips.md#delivery-sequence-and-exit-gates) owns the detailed
-order and gates. The broader capability groups below describe subsequent or
-shared work, not a competing instruction to prioritize scalar-line analysis.
-
-| Capability group | Deliverable | Gate before claiming support |
+| Step | Code scope | Structural change |
 | --- | --- | --- |
-| Complete Rips, selected first | All R1-R10 capabilities in the dedicated design | Every Rips delivery gate, independently validated and documented; H0/H1 construction alone is insufficient |
-| Analysis closure | Better diagram-to-feature composition, a scalar-line capability, runnable multi-sample examples | Hand-computable outputs, negative/tied scalar cases, coverage-aware queries, explicit feature settings |
-| Additional data domains | A specified cubical input/construction and computation | Independently assembled tiny-grid boundaries, scalar conventions and resource evidence |
-| Algebra reuse beyond Rips | Adapt established field/reduction components to another actual consumer | Verify the consumer's boundary, ordering and result contracts independently |
-| Geometry and simplification | Sampling/collapse outside the Rips target; Alpha when geometry infrastructure is ready | Preservation tests with hypotheses, robust degeneracy cases and native dependency review |
-| Specialized expansion | Zigzag, cover complexes, or reconstruction selected by real demand | Own mathematical/output contract and complete end-to-end example |
+| 1. Adapter/resource correction | `complex/simplicial`, `persistence/simplicial`, `persistence/filtered.rs`, direct Rips preparation | Reuse immutable guarantees, cache structural facts, avoid unused exact-Rips edges; keep public result semantics |
+| 2. Result API revision | `diagram`, result assembly, descriptors and diagram distances | Add common data and computed dimensions, thin reference adapters, shared context assembly and the explicit migration above |
+| 3. Algorithm integration | Existing persistence algorithms and source adapters | Keep algorithms independent of the default facade; reuse compatible types; expose only meaningful specialized operations |
+| 4. Contributor documentation | Architecture, algorithm guides and examples | Describe actual call boundaries, ownership and extension scope; update the module map to match implemented code |
 
-Deliver complete operations within the Rips workstream rather than creating all
-proposed modules simultaneously. Finish each operation's contract, independent
-validation, API, documentation and example without dropping the remaining Rips
-completion requirements. Future library groups do not weaken that target.
+Keep mathematical optimization changes separate from adapter and API refactors.
+Local file splits follow implemented responsibilities. Public naming and trait
+bounds are compatibility decisions, not consequences of how many files exist.
+External result import, runtime plugins, generic cellular witnesses and additional
+filtration families remain separate workstreams.
 
-Prime fields require oriented boundary coefficients and modular arithmetic;
-replacing an F2 XOR operation alone is not sufficient. Generalized Rips requires
-safe combinatorial indexing, dimension-by-dimension algorithms, and new cost
-evidence; increasing an option's accepted dimension is not implementation.
+## Verification of the design implementation
 
-Pure Rust Alpha/weighted geometry must account for predicates, triangulation,
-degeneracy handling, and filtration accuracy. Scope a first geometry capability
-by dimension and supported inputs. Do not promise parity with CGAL's full
-geometry stack as an incidental part of a TDA refactor.
+The dependencies, types and ownership above define the architecture. Verification
+checks their implementation; it does not replace design with admission scenarios.
+Use the [testing strategy](../development/testing.md) and independent mathematical
+oracles, preserving their independence from production algorithms.
 
-## Validation and project development
+Exercise independently varying construction/query caps, built/requested dimensions
+and diagram/representative requests. Include unequal and signed births, non-flag
+topology, fields and approximation blockers. Validate witness equations and
+associations rather than requiring arbitrary bases to match.
 
-Examples should be small, deterministic, runnable with Cargo, and explicit about
-parameters and result interpretation. Suitable acceptance scenarios include:
+Native comparisons use pinned GUDHI/Ripser C++ paths with compatible capabilities
+and timing boundaries. Update the existing [performance report](../../benches/reports/rips-comparison.md)
+against full commits under the [reporting rules](../../benches/reporting.md).
+Generated evidence stays outside Git; unit tests do not assert machine timings.
+A documentation revision makes no new performance or algorithm-correctness claim.
 
-- A point-cloud loop with a cutoff, feature curve, and visible censoring.
-- A scalar signal with known extrema, including ties and negative values.
-- A small image/grid whose connected components and hole can be calculated by hand.
-- Several samples converted using the same feature grid, retaining sample IDs.
+## Design references and adopted choices
 
-These are kernel demonstrations, not a new application framework.
+These primary references inform the choices above; they do not prescribe a single
+architecture for Rust libraries. Linked library APIs are design examples, not new
+dependencies or a recommendation to copy their entire frameworks.
 
-The [validation strategy](../development/testing.md) describes current oracles
-and regression coverage. For each new capability, require an independent
-mathematical example/property, native GUDHI C++ differential checks where
-applicable, adversarial cases,
-documented failure behavior, and meaningful performance measurements. Separate
-dataset preparation, construction, reduction, and output conversion.
-
-A new production generic reducer needs an independent small oracle or direct
-expected results. Reusing the current reference reducer as production while
-still calling its output an independent check would remove that safeguard.
-
-The project can grow through complete, reviewable operations: a small documented
-API, one runnable example, independent evidence, and a compatibility statement.
-Release readiness remains a gate, while module count and a full GUDHI feature
-checklist are not measures of completion.
+| Reference | Adopted choice |
+| --- | --- |
+| [Rust API Guidelines: flexibility](https://rust-lang.github.io/api-guidelines/flexibility.html) | Expose useful data, make ownership/copying explicit, and weigh genericity against signature and code-size costs |
+| [Rust API Guidelines: type safety](https://rust-lang.github.io/api-guidelines/type-safety.html) | Types distinguish meaningful states; Builder ownership follows the operation |
+| [Rust API Guidelines: future proofing](https://rust-lang.github.io/api-guidelines/future-proofing.html) | Private representation and deliberate sealed facades preserve evolution space |
+| [Standard-library AsRef](https://doc.rust-lang.org/std/convert/trait.AsRef.html) | Borrow existing data cheaply and infallibly; no conversion work or mathematical certification |
+| [Rust Reference: dyn compatibility](https://doc.rust-lang.org/reference/items/traits.html#dyn-compatibility) | Separate static iterator-based adaptation from runtime trait-object interfaces |
+| [petgraph Dijkstra](https://docs.rs/petgraph/0.8.3/petgraph/algo/dijkstra/fn.dijkstra.html) | Algorithms request relevant access capabilities rather than one concrete graph storage |
+| [ndarray ArrayView](https://docs.rs/ndarray/latest/ndarray/type.ArrayView.html) | Distinguish borrowed views from owned storage without requiring callers to copy |
+| [argmin Solver](https://docs.rs/argmin/0.11.0/argmin/core/trait.Solver.html) | Separate mathematical work from execution support; its iteration protocol is specific to that framework and is not imposed on TDA operations |
+| [GUDHI C++ study](../research/gudhi-cpp.md) | Permit specialized representations and algorithms with operation-specific contracts |

@@ -458,7 +458,7 @@ fn odd_prime_random_filtrations_match_independent_ranks() {
 }
 #[test]
 fn request_validation_censoring_and_execution_are_explicit() {
-    for bad in [-1., f64::NAN, f64::INFINITY] {
+    for bad in [f64::NAN, f64::INFINITY] {
         assert!(RepresentativeRequest::new(1, bad, RepresentativeSelection::Both).is_err());
     }
     let values = [1., 2., 1., 1., 2., 1.];

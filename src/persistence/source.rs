@@ -1,8 +1,8 @@
 //! Consumer-owned source support; engine dispatch stays out of public traits.
 use super::{PersistenceBuilder, PersistenceOptions, RepresentativeRequest, flag, rips};
+use crate::complex::SimplicialComplex;
 use crate::diagram::{ComputationContext, PersistenceResult};
 use crate::execution::WorkBudget;
-use crate::filtration::flag::ExplicitAccess;
 use crate::filtration::rips::builder::Input;
 use crate::filtration::{
     ApproximateRipsBuilder, FlagFiltration, RipsBuilder, RipsExpansion, SimplicialFiltration,
@@ -65,7 +65,18 @@ source!(
     SparseRipsExpansion,
     rips::approximation::compute_expanded_sparse_rips_budget
 );
-source!(SimplicialFiltration, explicit);
+impl Sealed for SimplicialFiltration {}
+impl PersistenceExt for SimplicialFiltration {
+    fn persistence(&self) -> PersistenceBuilder<'_, 'static, Self> {
+        PersistenceBuilder::new_filtered(self, explicit)
+    }
+}
+impl Sealed for SimplicialComplex {}
+impl PersistenceExt for SimplicialComplex {
+    fn persistence(&self) -> PersistenceBuilder<'_, 'static, Self> {
+        PersistenceBuilder::new_filtered(self, supplied)
+    }
+}
 
 fn exact(
     input: &RipsBuilder<'_>,
@@ -74,7 +85,7 @@ fn exact(
     budget: &mut WorkBudget<'_>,
 ) -> Result<PersistenceResult> {
     input.validate()?;
-    let mut result = match input.input {
+    let result = match input.input {
         Input::Matrix(matrix) => {
             if let Some(through) = input.max_edge.filter(|t| *t < matrix.diameter())
                 && options.max_edge().is_some_and(|t| t > through)
@@ -93,10 +104,16 @@ fn exact(
             rips::compute_rips_from_distances_budget(matrix, &effective, requests, budget)?
         }
         Input::Points(_) if input.max_edge.or(options.max_edge()).is_some() => {
-            // An analysis-only cap may limit preparation, but is not a new source cap.
+            // Retain only edges needed by this analysis. Construction still scans
+            // every pair, so coverage records omitted edges even across a gap in
+            // edge values. The caller's source cap is restored in result context.
+            let effective = match (input.max_edge, options.max_edge()) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
             let prepared = RipsBuilder {
                 input: input.input,
-                max_edge: input.max_edge.or(options.max_edge()),
+                max_edge: effective,
             }
             .prepare_budget(budget)?;
             rips::compute_threshold_rips_budget(&prepared, options, requests, budget)?
@@ -109,11 +126,16 @@ fn exact(
             rips::compute_rips_from_distances_budget(matrix, options, requests, budget)?
         }
     };
-    result.context.kind = crate::filtration::expansion::kind(input.input.kind(), false);
-    result.context.requested_cutoff = options.max_edge();
-    result.context.construction_cutoff = input.max_edge;
+    let context = ComputationContext::new(
+        options.field(),
+        crate::filtration::expansion::kind(input.input.kind(), false),
+        input.input.len(),
+        options.max_edge(),
+        input.max_edge,
+        None,
+    );
     budget.check()?;
-    Ok(result)
+    Ok(result.with_context(context))
 }
 fn approximate(
     input: &ApproximateRipsBuilder<'_>,
@@ -137,35 +159,49 @@ fn explicit(
             constructed_simplex_dimension: input.dimension,
         });
     }
-    let (cutoff, coverage) = crate::persistence::options::source_range(
+    let (cutoff, coverage) = super::simplicial::source_range(
         input.coverage,
-        input.max_edge,
+        input.complex.max_filtration_value(),
         options.max_edge(),
     )?;
-    let access = ExplicitAccess {
-        complex: &input.complex,
-        vertex_count: input.context.vertex_count,
-        cutoff,
-    };
+    let effective = PersistenceOptions::for_filtration(options.max_homology_dimension(), cutoff)?
+        .with_field(options.field());
     let (diagram, representatives) =
-        flag::finish(&access, options, requests, coverage, budget, |budget| {
-            flag::compute_simplicial(
-                &access,
-                options.max_homology_dimension(),
-                options.field(),
-                budget,
-            )
-        })?;
-    Ok(PersistenceResult {
+        super::simplicial::compute(&input.complex, &effective, requests, coverage, budget)?;
+    Ok(PersistenceResult::new(
         diagram,
+        ComputationContext::from_filtration(
+            input.context.clone(),
+            options.field(),
+            options.max_edge(),
+        ),
         representatives,
-        context: ComputationContext {
-            field: options.field(),
-            kind: input.context.kind,
-            vertex_count: input.context.vertex_count,
-            approximation: input.context.approximation.clone(),
-            construction_cutoff: input.context.construction_cutoff,
-            requested_cutoff: options.max_edge(),
-        },
-    })
+    ))
+}
+
+fn supplied(
+    input: &SimplicialComplex,
+    options: &PersistenceOptions,
+    requests: &[RepresentativeRequest],
+    budget: &mut WorkBudget<'_>,
+) -> Result<PersistenceResult> {
+    let (_, coverage) = super::simplicial::source_range(
+        crate::filtration::Coverage::Complete,
+        input.max_filtration_value(),
+        options.max_edge(),
+    )?;
+    let (diagram, representatives) =
+        super::simplicial::compute(input, options, requests, coverage, budget)?;
+    Ok(PersistenceResult::new(
+        diagram,
+        ComputationContext::new(
+            options.field(),
+            crate::filtration::FiltrationKind::SuppliedSimplicial,
+            input.vertex_count(),
+            options.max_edge(),
+            None,
+            None,
+        ),
+        representatives,
+    ))
 }

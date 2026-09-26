@@ -3,5 +3,5 @@ mod basis;
 mod complex;
 mod dual;
 mod request;
-pub(super) use basis::compute;
+pub(in crate::persistence) use basis::{compute, compute_explicit};
 pub use request::{RepresentativeRequest, RepresentativeSelection};

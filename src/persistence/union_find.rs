@@ -6,14 +6,14 @@
 use crate::{Error, Result};
 
 /// Component partition with path halving and union by size.
-pub(super) struct UnionFind {
+pub(in crate::persistence) struct UnionFind {
     parents: Vec<usize>,
     sizes: Vec<usize>,
     components: usize,
 }
 
 impl UnionFind {
-    pub(super) fn new(n: usize) -> Result<Self> {
+    pub(in crate::persistence) fn new(n: usize) -> Result<Self> {
         let mut parents = Vec::new();
         let mut sizes = Vec::new();
         parents
@@ -36,11 +36,11 @@ impl UnionFind {
     }
 
     /// Number of components after all merges performed so far.
-    pub(super) fn components(&self) -> usize {
+    pub(in crate::persistence) fn components(&self) -> usize {
         self.components
     }
 
-    pub(super) fn merge(&mut self, a: usize, b: usize) -> bool {
+    pub(in crate::persistence) fn merge(&mut self, a: usize, b: usize) -> bool {
         let (mut a, mut b) = (root(&mut self.parents, a), root(&mut self.parents, b));
         if a == b {
             return false;

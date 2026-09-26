@@ -2,6 +2,57 @@
 
 ## 0.1.0 (unreleased)
 
+- Separate owned boundary computation from filtered-source validation and keep
+  exact flag selection in a private dispatch module. Explicit and approximate
+  Rips call simplicial algorithms directly. Add a persistence-reduction contributor
+  walkthrough and focused CI check, including hand-derived column tests; no new
+  public algorithm-selection API is introduced.
+- Pre-release breaking result revision: `PersistenceDiagram::max_dimension()`
+  now reports only the greatest computed dimension, not membership of all lower
+  dimensions. Add `ComputedDimensions`, `with_dimensions` and
+  `computed_dimensions`; `new(q, ...)` and default builders still compute `0..=q`.
+  Dimension queries, descriptors and distances reject gaps. `DimensionNotComputed`
+  retains `computed_max` as an upper bound, with updated diagnostics.
+- Add owned `PersistenceData` for diagram/context composition, borrowed through
+  `AsRef<PersistenceData>`. `PersistenceResult` retains its accessors and adds
+  consuming `into_data`/`into_parts`; representatives keep their interval indices.
+  Context-aware distance functions are now generic over two compatible wrappers;
+  function-item types and explicit generic signatures therefore change. Common
+  result/context assembly stays crate-internal; no external import API is added.
+- Reuse frozen simplicial incidence during boundary analysis and representative
+  extraction, while retaining validation for external filtered-cell inputs.
+  Cache vertex count, dimension and the zero-born invariant at construction.
+  Direct exact point analysis retains edges only through the effective analysis
+  range, preserving the caller's construction cutoff and coverage semantics.
+- Retain H0 union-find and coface clearing for diagram-only zero-born explicit
+  simplicial analysis, including non-flag topology with delayed simplex values.
+  Keep negative cutoffs and arbitrary vertex births on the general boundary path.
+  Clarify that diagram-result scale checks establish a parameter convention,
+  while callers still establish common units and normalization.
+- Integrate diagram matching with supplied filtered complexes: result wrappers
+  require equal fields and declared edge-length parameter conventions; raw diagrams
+  remain available when callers establish units. Add focused distance checks and
+  preserve both H1 optimization and general filtered-cell workflows.
+
+- Add an explicit complex-construction contributor walkthrough, a lower-star
+  example with mathematical tests, and a focused construction check. Reuse the
+  existing simplicial storage and persistence engine without adding public APIs.
+
+- Add research-area contribution navigation, an executable diagram-analysis
+  tutorial, an interval-only analysis example and a focused contributor check.
+  Keep full CI verification while separating algorithm work from kernel integration.
+
+- Add the four-method `FilteredComplex` contract and generic prime-field boundary
+  analysis through `PersistenceBuilder::from_complex`. Add validated `Simplex`
+  and `SimplicialComplex` construction; retain `FilteredSimplicialComplex` as an alias.
+- Remove maximum-edge and zero-vertex-birth assumptions from explicit builder
+  analysis. Support signed filtration cutoffs, representative queries and Betti
+  grids. Generic cell analysis returns diagrams; vertex-labelled representatives
+  remain specific to simplicial sources. Rips distance controls retain their contract.
+- Separate contextual source certificates from simplicial storage, share typed
+  source metadata between construction/results, and move general simplicial
+  representatives out of the flag domain. Preserve legacy Rips paths and certificate
+  checks. No Alpha/cubical constructor or new performance parity is claimed.
 - Add native safe Rust bottleneck (L-infinity), W1 (L-infinity) and W2
   (Euclidean) diagram distances, with complete-coverage and context validation,
   essential multiplicity, independent matching tests and native comparison tools.

@@ -14,6 +14,10 @@ pub enum Coverage {
 /// Mathematical source of a computed ordinary persistence diagram.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FiltrationKind {
+    /// A supplied simplicial complex, without a claim about a larger source.
+    SuppliedSimplicial,
+    /// A supplied filtered cell complex accessed through the public contract.
+    SuppliedCells,
     /// Exact Rips of supplied symmetric dissimilarities (not necessarily a metric).
     RipsDissimilarities,
     /// Exact Rips of computed Euclidean distances.

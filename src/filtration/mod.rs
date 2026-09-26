@@ -21,8 +21,11 @@ pub use provenance::{Coverage, FiltrationKind};
 pub use rips::approximation::{ApproximationTarget, RipsApproximation, RipsApproximationBound};
 
 pub(crate) mod expansion;
-pub use expansion::{FiltrationContext, SimplicialFiltration};
+pub(crate) mod simplicial;
 pub use rips::{RipsBuilder, RipsCallbackBuilder};
+pub use simplicial::SimplicialFiltration;
+mod context;
+pub use context::{FiltrationContext, FiltrationScale, FiltrationSource};
 /// Owned exact preparation; compatibility name is [`ThresholdRips`].
 pub type RipsFiltration = ThresholdRips;
 /// Owned blocker-aware preparation; compatibility name is [`SparseRips`].

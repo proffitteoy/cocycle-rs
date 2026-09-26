@@ -4,11 +4,11 @@ use crate::diagram::{
 };
 use crate::filtration::{
     RipsInputKind, SparseRips, SparseRipsExpansion,
-    flag::{ExplicitAccess, SimplicialAccess},
     rips::approximation::SparseRipsAccess,
+    simplicial::{ZeroBornExplicitAccess, ZeroBornSimplicialAccess},
 };
 use crate::persistence::{
-    ExecutionLimits, PersistenceOptions, RepresentativeRequest, execution::WorkBudget, flag,
+    ExecutionLimits, PersistenceOptions, RepresentativeRequest, execution::WorkBudget, simplicial,
 };
 use crate::{Error, Result};
 
@@ -106,7 +106,7 @@ pub(in crate::persistence) fn compute_expanded_sparse_rips_budget(
         input.max_edge,
         options.max_edge(),
     )?;
-    let access = ExplicitAccess {
+    let access = ZeroBornExplicitAccess {
         complex: &input.complex,
         vertex_count: input.metadata.retained_vertices().len(),
         cutoff,
@@ -123,7 +123,7 @@ pub(in crate::persistence) fn compute_expanded_sparse_rips_budget(
 }
 
 fn compute(
-    access: &impl SimplicialAccess,
+    access: &impl ZeroBornSimplicialAccess,
     metadata: &RipsApproximation,
     kind: RipsInputKind,
     coverage: Coverage,
@@ -132,28 +132,28 @@ fn compute(
     budget: &mut WorkBudget<'_>,
 ) -> Result<PersistenceResult> {
     let (diagram, representatives) =
-        flag::finish(access, options, requests, coverage, budget, |budget| {
-            flag::compute_simplicial(
+        simplicial::finish_zero_born(access, options, requests, coverage, budget, |budget| {
+            simplicial::cohomology::compute(
                 access,
                 options.max_homology_dimension(),
                 options.field(),
                 budget,
             )
         })?;
-    Ok(PersistenceResult {
+    Ok(PersistenceResult::new(
         diagram,
-        representatives,
-        context: ComputationContext {
-            approximation: Some(metadata.clone()),
-            field: options.field(),
-            kind: match kind {
+        ComputationContext::new(
+            options.field(),
+            match kind {
                 RipsInputKind::Dissimilarities => FiltrationKind::SparseRipsDissimilarities,
                 RipsInputKind::Euclidean => FiltrationKind::SparseRipsEuclidean,
                 RipsInputKind::Custom => FiltrationKind::SparseRipsCustom,
             },
-            vertex_count: access.vertex_count(),
-            requested_cutoff: options.max_edge(),
-            construction_cutoff: metadata.max_scale(),
-        },
-    })
+            access.vertex_count(),
+            options.max_edge(),
+            metadata.max_scale(),
+            Some(metadata.clone()),
+        ),
+        representatives,
+    ))
 }

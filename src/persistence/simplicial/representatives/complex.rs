@@ -5,13 +5,13 @@ use crate::algebra::{
     reduction::{self, BoundaryReduction},
 };
 use crate::complex::Simplex;
-use crate::filtration::flag::{SimplicialAccess, next_dimension};
+use crate::filtration::simplicial::{ZeroBornSimplicialAccess, next_dimension};
 use crate::persistence::execution::WorkBudget;
 use crate::{Error, Result};
 use std::collections::HashMap;
 
 pub(super) fn reduce(
-    access: &impl SimplicialAccess,
+    access: &impl ZeroBornSimplicialAccess,
     max_dimension: usize,
     field: PrimeField,
     budget: &mut WorkBudget<'_>,

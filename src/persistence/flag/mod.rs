@@ -1,85 +1,16 @@
 //! Shared exact flag engines and supplied-graph computation.
 mod cohomology;
+mod dispatch;
 mod h0;
-mod representatives;
-pub use representatives::{RepresentativeRequest, RepresentativeSelection};
-mod union_find;
-pub(super) use cohomology::dimensions::compute as compute_simplicial;
+use super::RepresentativeRequest;
+use super::simplicial::finish_zero_born;
+pub(super) use dispatch::{compute_dense, compute_graph};
 
 use super::execution::WorkBudget;
-use super::{ExecutionLimits, PersistenceOptions, assemble_diagram};
+use super::{ExecutionLimits, PersistenceOptions};
 use crate::Result;
-use crate::algebra::PrimeField;
-use crate::complex::WeightedGraph;
 use crate::diagram::{ComputationContext, Coverage, FiltrationKind, PersistenceResult};
-use crate::filtration::{
-    FlagFiltration,
-    flag::{CliqueAccess, DenseFlag, SparseFlag},
-};
-use crate::geometry::DissimilarityMatrixView;
-
-type RawIntervals = Vec<(usize, f64, Option<f64>)>;
-
-pub(super) fn compute_dense(
-    input: DissimilarityMatrixView<'_>,
-    dimension: usize,
-    cutoff: f64,
-    field: PrimeField,
-    budget: &mut WorkBudget<'_>,
-) -> Result<RawIntervals> {
-    budget.check()?;
-    if dimension == 0 {
-        h0::compute(
-            input.len(),
-            (0..input.len()).flat_map(|b| (0..b).map(move |a| (a, b, input.get(a, b).unwrap()))),
-            cutoff,
-            budget,
-        )
-    } else {
-        let stop = cutoff.min(crate::filtration::rips::cone_radius(input, &mut || {
-            budget.step()
-        })?);
-        if dimension > 1 || field.characteristic() != 2 {
-            return compute_simplicial(&CliqueAccess::Dense(input, stop), dimension, field, budget);
-        }
-        let access = DenseFlag::new(input, stop)?;
-        budget.check()?;
-        cohomology::compute(&access, budget)
-    }
-}
-
-pub(super) fn compute_graph(
-    graph: &WeightedGraph,
-    dimension: usize,
-    cutoff: f64,
-    field: PrimeField,
-    budget: &mut WorkBudget<'_>,
-) -> Result<RawIntervals> {
-    budget.check()?;
-    if dimension == 0 {
-        h0::compute(
-            graph.vertex_count(),
-            graph
-                .edges()
-                .iter()
-                .map(|e| (e.vertices[0], e.vertices[1], e.value)),
-            cutoff,
-            budget,
-        )
-    } else {
-        if dimension > 1 || field.characteristic() != 2 {
-            return compute_simplicial(
-                &CliqueAccess::Sparse(graph, cutoff),
-                dimension,
-                field,
-                budget,
-            );
-        }
-        let access = SparseFlag::new(graph, cutoff)?;
-        budget.check()?;
-        cohomology::compute(&access, budget)
-    }
-}
+use crate::filtration::{FlagFiltration, flag::CliqueAccess};
 
 /// Compute ordinary dimension-generic prime-field persistence of a supplied graph's clique filtration.
 ///
@@ -131,7 +62,7 @@ pub(in crate::persistence) fn compute_flag_budget(
         Some(t) if t < graph.max_edge() => (t, Coverage::Through(t)),
         _ => (graph.max_edge(), Coverage::Complete),
     };
-    let (diagram, representatives) = finish(
+    let (diagram, representatives) = finish_zero_born(
         &CliqueAccess::Sparse(graph, cutoff),
         options,
         requests,
@@ -147,46 +78,16 @@ pub(in crate::persistence) fn compute_flag_budget(
             )
         },
     )?;
-    Ok(PersistenceResult {
+    Ok(PersistenceResult::new(
         diagram,
-        representatives,
-        context: ComputationContext {
-            approximation: None,
-            field: options.field(),
-            kind: FiltrationKind::SuppliedFlag,
-            vertex_count: graph.vertex_count(),
-            requested_cutoff: options.max_edge(),
-            construction_cutoff: None,
-        },
-    })
-}
-
-/// Shared dispatch for optional representatives; ordinary calls keep their implicit engine.
-pub(super) fn finish(
-    access: &impl crate::filtration::flag::SimplicialAccess,
-    options: &PersistenceOptions,
-    requests: &[RepresentativeRequest],
-    coverage: Coverage,
-    budget: &mut WorkBudget<'_>,
-    implicit: impl FnOnce(&mut WorkBudget<'_>) -> Result<RawIntervals>,
-) -> Result<(
-    crate::diagram::PersistenceDiagram,
-    Option<Vec<crate::diagram::Representative>>,
-)> {
-    let result = if requests.is_empty() {
-        (
-            assemble_diagram(
-                options.max_homology_dimension(),
-                coverage,
-                implicit(budget)?,
-            )?,
+        ComputationContext::new(
+            options.field(),
+            FiltrationKind::SuppliedFlag,
+            graph.vertex_count(),
+            options.max_edge(),
             None,
-        )
-    } else {
-        let (diagram, representatives) =
-            representatives::compute(access, options, requests, coverage, budget)?;
-        (diagram, Some(representatives))
-    };
-    budget.check()?;
-    Ok(result)
+            None,
+        ),
+        representatives,
+    ))
 }

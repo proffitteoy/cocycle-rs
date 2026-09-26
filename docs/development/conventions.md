@@ -23,6 +23,9 @@ the [kernel design gates](../design/kernel.md), not create empty module trees.
   Use `pub(crate)` for actual cross-module consumers. Private file nesting does
   not require public nesting; re-export established paths when splitting files.
   A public rename needs an explicit compatibility decision and migration.
+  Distinguish `Simplex` (one simplex), `SimplicialComplex` (storage),
+  `FilteredComplex` (read-only algorithm contract), and `SimplicialFiltration`
+  (stored topology plus source certificates). Do not call non-tree storage a simplex tree.
 - Keep local indices, options, and workspaces with their feature. Use distinct
   index types when confusing storage positions and mathematical IDs is a real
   risk. Shared helpers belong below their consumers, not in a sibling algorithm.
