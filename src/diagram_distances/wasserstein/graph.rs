@@ -5,6 +5,7 @@
 use super::capacity_bytes;
 use super::{Metric, Point, Stats, allocation, buffer, product, push, saving, sum_size};
 use crate::Result;
+use crate::execution::WorkBudget;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Edge {
@@ -57,6 +58,14 @@ impl Graph {
         record! { _stats.peak_graph_storage_bytes = _stats.peak_graph_storage_bytes.max(bytes); }
     }
 
+    // Dense iterators inspect absent edges too; CSR visits only stored edges.
+    pub(super) fn row_work(&self, row: usize) -> usize {
+        match &self.storage {
+            Storage::Dense(_) => self.columns.max(1),
+            Storage::Csr { offsets, .. } => (offsets[row + 1] - offsets[row]).max(1),
+        }
+    }
+
     pub(super) fn edges(&self, row: usize) -> Edges<'_> {
         match &self.storage {
             Storage::Dense(values) => Edges::Dense(
@@ -70,11 +79,13 @@ impl Graph {
         }
     }
 
-    pub(super) fn from_candidates(
+    pub(super) fn from_candidates<const CONTROLLED: bool>(
         rows: Vec<Vec<Edge>>,
         columns: usize,
         force_csr: bool,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
     ) -> Result<Self> {
+        budget.step_by(rows.len())?;
         let row_count = rows.len();
         let pairs = product(row_count, columns)?;
         let edge_count = rows.iter().try_fold(0, |n, row| sum_size(n, row.len()))?;
@@ -84,8 +95,10 @@ impl Graph {
             edge_count as f64 / pairs as f64
         };
         let storage = if !force_csr && (pairs <= 1024 || density >= 0.15) {
+            budget.step_by(pairs)?;
             let mut values = buffer(pairs, 0.0)?;
             for (row, edges) in rows.iter().enumerate() {
+                budget.step_by(edges.len())?;
                 for edge in edges {
                     values[row * columns + edge.column] = edge.saving;
                 }
@@ -102,6 +115,7 @@ impl Graph {
                 .map_err(|_| allocation())?;
             offsets.push(0);
             for row in rows {
+                budget.step_by(row.len().max(1))?;
                 edges.extend(row);
                 offsets.push(edges.len());
             }
@@ -124,10 +138,16 @@ impl Graph {
         }
     }
 
-    pub(super) fn active(&self) -> Result<(Vec<usize>, Vec<usize>)> {
+    pub(super) fn active<const CONTROLLED: bool>(
+        &self,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<(Vec<usize>, Vec<usize>)> {
         let mut rows = Vec::new();
         let mut used = buffer(self.columns, false)?;
         for row in 0..self.rows {
+            if CONTROLLED {
+                budget.step_by(self.row_work(row))?;
+            }
             let mut active = false;
             for edge in self.edges(row) {
                 active = true;
@@ -139,6 +159,9 @@ impl Graph {
         }
         let mut columns = Vec::new();
         for (column, present) in used.into_iter().enumerate() {
+            if CONTROLLED && column % 256 == 0 {
+                budget.step_by((self.columns - column).min(256))?;
+            }
             if present {
                 push(&mut columns, column)?;
             }
@@ -147,12 +170,14 @@ impl Graph {
     }
 }
 
-pub(super) fn generate(
+pub(super) fn generate<const CONTROLLED: bool>(
     first: &[Point],
     second: &[Point],
     metric: Metric,
     _stats: &mut Stats,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
 ) -> Result<Graph> {
+    budget.step_by(second.len())?;
     let pairs = product(first.len(), second.len())?;
     let mut candidates = buffer(first.len(), Vec::new())?;
     let mut direct_cost_required = false;
@@ -167,6 +192,7 @@ pub(super) fn generate(
             .total_cmp(&second[b].midpoint)
             .then(a.cmp(&b))
     });
+    budget.step_by(second.len())?;
     let maximum_half = second.iter().fold(0.0_f64, |a, b| a.max(b.half));
     let midpoint_error = |point: Point| {
         (point.midpoint.next_up() - point.midpoint).max(point.midpoint - point.midpoint.next_down())
@@ -207,8 +233,11 @@ pub(super) fn generate(
     // SIMD/parallel reference routes intentionally use the scalar equivalent.
     let sweep = pairs > 1024 && window_density < 0.75;
     for (row, &point) in first.iter().enumerate() {
+        budget.step()?;
         if sweep {
-            for &column in &order[window(point)] {
+            let range = window(point);
+            budget.step_by(range.len())?;
+            for &column in &order[range] {
                 record! { _stats.candidate_pairs += 1; }
                 let (value, direct) = saving(point, second[column], metric)?;
                 direct_cost_required |= direct;
@@ -223,6 +252,7 @@ pub(super) fn generate(
                 }
             }
         } else {
+            budget.step_by(second.len())?;
             for (column, &other) in second.iter().enumerate() {
                 record! { _stats.candidate_pairs += 1; }
                 let (value, direct) = saving(point, other, metric)?;
@@ -240,7 +270,7 @@ pub(super) fn generate(
         }
         record! { _stats.positive_edges += candidates[row].len(); }
     }
-    let mut graph = Graph::from_candidates(candidates, second.len(), false)?;
+    let mut graph = Graph::from_candidates(candidates, second.len(), false, budget)?;
     graph.direct_cost_required = direct_cost_required;
     Ok(graph)
 }
@@ -250,9 +280,15 @@ pub(super) struct Component {
     pub(super) columns: Vec<usize>,
 }
 
-pub(super) fn components(graph: &Graph) -> Result<Vec<Component>> {
+pub(super) fn components<const CONTROLLED: bool>(
+    graph: &Graph,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
+) -> Result<Vec<Component>> {
     let mut reverse = buffer(graph.columns, Vec::new())?;
     for row in 0..graph.rows {
+        if CONTROLLED {
+            budget.step_by(graph.row_work(row))?;
+        }
         for edge in graph.edges(row) {
             push(&mut reverse[edge.column], row)?;
         }
@@ -265,6 +301,9 @@ pub(super) fn components(graph: &Graph) -> Result<Vec<Component>> {
         .try_reserve_exact(sum_size(graph.rows, graph.columns)?)
         .map_err(|_| allocation())?;
     for start in 0..graph.rows {
+        if CONTROLLED {
+            budget.step_by(graph.row_work(start))?;
+        }
         if row_seen[start] || graph.edges(start).next().is_none() {
             continue;
         }
@@ -280,6 +319,9 @@ pub(super) fn components(graph: &Graph) -> Result<Vec<Component>> {
             let (is_row, index) = queue[next];
             next += 1;
             if is_row {
+                if CONTROLLED {
+                    budget.step_by(graph.row_work(index))?;
+                }
                 push(&mut component.rows, index)?;
                 for edge in graph.edges(index) {
                     if !col_seen[edge.column] {
@@ -288,6 +330,9 @@ pub(super) fn components(graph: &Graph) -> Result<Vec<Component>> {
                     }
                 }
             } else {
+                if CONTROLLED {
+                    budget.step_by(reverse[index].len().max(1))?;
+                }
                 push(&mut component.columns, index)?;
                 for &row in &reverse[index] {
                     if !row_seen[row] {
@@ -302,7 +347,11 @@ pub(super) fn components(graph: &Graph) -> Result<Vec<Component>> {
     Ok(result)
 }
 
-pub(super) fn groups(points: &[Point]) -> Result<(Vec<Point>, Vec<usize>)> {
+pub(super) fn groups<const CONTROLLED: bool>(
+    points: &[Point],
+    budget: &mut WorkBudget<'_, CONTROLLED>,
+) -> Result<(Vec<Point>, Vec<usize>)> {
+    budget.step_by(points.len())?;
     let mut order = Vec::new();
     order
         .try_reserve_exact(points.len())
@@ -315,7 +364,10 @@ pub(super) fn groups(points: &[Point]) -> Result<(Vec<Point>, Vec<usize>)> {
     });
     let mut unique: Vec<Point> = Vec::new();
     let mut multiplicity: Vec<usize> = Vec::new();
-    for index in order {
+    for (position, index) in order.into_iter().enumerate() {
+        if CONTROLLED && position % 256 == 0 {
+            budget.step_by((points.len() - position).min(256))?;
+        }
         if unique
             .last()
             .is_some_and(|p| p.coordinates == points[index].coordinates)

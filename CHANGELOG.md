@@ -2,6 +2,11 @@
 
 ## 0.1.0 (unreleased)
 
+- Add `_with` variants of all three raw and context-aware diagram distances.
+  One `Execution` budget spans preparation, matching and accumulation, with
+  cooperative work limits and cancellation. Existing entry points retain their
+  unlimited behavior; matching routes remain private.
+
 - Pre-release breaking diagram access revision: `PersistenceDiagram::intervals()`
   now yields `PersistenceInterval` values in canonical logical order, preserving
   multiplicity. Add `len`, `is_empty`, and `interval(index)` for logical ordinals;

@@ -3,7 +3,7 @@
 #[cfg(any(test, cocycle_distance_bench))]
 use super::bytes;
 use super::{Diagnostics, NONE, Pair, filled, reserve, size_overflow};
-use crate::Result;
+use crate::{Result, execution::WorkBudget};
 
 #[derive(Clone, Copy)]
 struct Edge {
@@ -54,15 +54,17 @@ impl Dinic {
         Ok(())
     }
 
-    fn max_flow(
+    fn max_flow<const CONTROLLED: bool>(
         &mut self,
         source: usize,
         sink: usize,
         required: usize,
         _stats: &mut Diagnostics,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
     ) -> Result<usize> {
         let mut total = 0_usize;
         while total < required {
+            budget.step_by(self.edges.len())?;
             self.levels.fill(NONE);
             self.queue.clear();
             self.levels[source] = 0;
@@ -72,6 +74,9 @@ impl Dinic {
                     break;
                 }
                 let node = self.queue[head];
+                if CONTROLLED {
+                    budget.step_by(self.edges[node].len().max(1))?;
+                }
                 for edge in &self.edges[node] {
                     if edge.capacity > 0 && self.levels[edge.target] == NONE {
                         self.levels[edge.target] = self.levels[node] + 1;
@@ -88,10 +93,14 @@ impl Dinic {
                 self.path.clear();
                 let mut node = source;
                 loop {
+                    budget.step()?;
                     if node == sink {
                         break;
                     }
                     let mut found = false;
+                    if CONTROLLED {
+                        budget.step_by(self.edges[node].len() - self.cursors[node])?;
+                    }
                     while self.cursors[node] < self.edges[node].len() {
                         let edge = self.edges[node][self.cursors[node]];
                         record! { _stats.adjacency_checks += 1; }
@@ -118,6 +127,7 @@ impl Dinic {
                 if node != sink {
                     break;
                 }
+                budget.step_by(self.path.len())?;
                 let mut amount = required - total;
                 for &(from, index) in &self.path {
                     amount = amount.min(self.edges[from][index].capacity);
@@ -155,13 +165,15 @@ impl Dinic {
     }
 }
 
-pub(super) fn within(
+pub(super) fn within<const CONTROLLED: bool>(
     pair: &Pair<'_, '_>,
     radius: f64,
     grouped: bool,
     _stats: &mut Diagnostics,
     _outer_bytes: usize,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
 ) -> Result<bool> {
+    budget.step()?;
     let first_indices = if grouped {
         &pair.first.representatives
     } else {
@@ -185,6 +197,7 @@ pub(super) fn within(
     let mut first_required = filled(n, false)?;
     let mut second_required = filled(m, false)?;
     for (left, &index) in first_indices.iter().enumerate() {
+        budget.step()?;
         let capacity = if grouped {
             pair.first.multiplicities[left]
         } else {
@@ -199,6 +212,7 @@ pub(super) fn within(
         incoming[left] = lower;
     }
     for (right, &index) in second_indices.iter().enumerate() {
+        budget.step()?;
         let capacity = if grouped {
             pair.second.multiplicities[right]
         } else {
@@ -216,11 +230,13 @@ pub(super) fn within(
         return Ok(true);
     }
     for (left, &index) in first_indices.iter().enumerate() {
+        budget.step()?;
         let window = if grouped {
             0..m
         } else {
             pair.second.window(pair.first.points[index][0], radius)
         };
+        budget.step_by(window.len())?;
         for right in window {
             if !grouped && !first_required[left] && !second_required[right] {
                 continue;
@@ -239,6 +255,7 @@ pub(super) fn within(
     }
     flow.edge(sink, source, pair.size)?;
     let mut required = 0_usize;
+    budget.step_by(sink + 1)?;
     for node in 0..=sink {
         if incoming[node] > outgoing[node] {
             let demand = incoming[node] - outgoing[node];
@@ -257,7 +274,7 @@ pub(super) fn within(
             .saturating_add(bytes(&first_required))
             .saturating_add(bytes(&second_required)),
     ); }
-    Ok(flow.max_flow(super_source, super_sink, required, _stats)? == required)
+    Ok(flow.max_flow(super_source, super_sink, required, _stats, budget)? == required)
 }
 
 #[cfg(test)]
@@ -272,8 +289,14 @@ mod tests {
             flow.edge(node - 1, node, 3).unwrap();
         }
         assert_eq!(
-            flow.max_flow(0, count - 1, 3, &mut Diagnostics::default())
-                .unwrap(),
+            flow.max_flow(
+                0,
+                count - 1,
+                3,
+                &mut Diagnostics::default(),
+                &mut WorkBudget::new(&crate::execution::Execution::default()).unwrap()
+            )
+            .unwrap(),
             3
         );
     }

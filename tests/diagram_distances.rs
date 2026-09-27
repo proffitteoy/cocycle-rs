@@ -5,13 +5,209 @@ use cocycle::algebra::PrimeField;
 use cocycle::complex::WeightedGraph;
 use cocycle::diagram::{Coverage, IntervalEnd, PersistenceDiagram, PersistenceInterval};
 use cocycle::diagram_distances::{
-    bottleneck_distance, bottleneck_distance_results, wasserstein_1_infinity,
-    wasserstein_1_infinity_results, wasserstein_2_euclidean, wasserstein_2_euclidean_results,
+    bottleneck_distance, bottleneck_distance_results, bottleneck_distance_results_with,
+    bottleneck_distance_with, wasserstein_1_infinity, wasserstein_1_infinity_results,
+    wasserstein_1_infinity_results_with, wasserstein_1_infinity_with, wasserstein_2_euclidean,
+    wasserstein_2_euclidean_results, wasserstein_2_euclidean_results_with,
+    wasserstein_2_euclidean_with,
 };
+use cocycle::execution::Execution;
 use cocycle::filtration::FlagFiltration;
 use cocycle::persistence::{ExecutionLimits, PersistenceOptions, compute_flag};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 type Distance = fn(&PersistenceDiagram, &PersistenceDiagram, usize) -> cocycle::Result<f64>;
+type ControlledDistance =
+    fn(&PersistenceDiagram, &PersistenceDiagram, usize, &Execution<'_>) -> cocycle::Result<f64>;
+const CONTROLLED: [ControlledDistance; 3] = [
+    bottleneck_distance_with,
+    wasserstein_1_infinity_with,
+    wasserstein_2_euclidean_with,
+];
+
+#[test]
+fn default_controls_preserve_values_and_errors() {
+    let cases = [
+        diagram(&[]),
+        diagram(&[[-2., 0.]]),
+        diagram(&[[0., 2.], [0., 2.], [3., 4.]]),
+        with_essential(&[[0., 1.]], &[0., 2.]),
+        with_essential(&[], &[1.]),
+        PersistenceDiagram::new(1, Coverage::Complete, vec![]).unwrap(),
+        PersistenceDiagram::new(0, Coverage::Through(2.), vec![]).unwrap(),
+        diagram(&[[0., f64::from_bits(1)]]),
+    ];
+    for (legacy, controlled) in DISTANCES.into_iter().zip(CONTROLLED) {
+        for a in &cases {
+            for b in &cases {
+                for dimension in [0, 1, 3] {
+                    assert_eq!(
+                        legacy(a, b, dimension),
+                        controlled(a, b, dimension, &Execution::default())
+                    );
+                    assert_eq!(
+                        legacy(a, b, dimension),
+                        controlled(a, b, dimension, &Execution::default().max_work(u64::MAX))
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn public_budgets_exhaust_recover_and_restart_for_each_call() {
+    let a = with_essential(&[[0., 2.], [1., 4.]], &[0., 3.]);
+    let b = with_essential(&[[0.5, 2.5]], &[0.25, 3.5]);
+    let original_a = a.clone();
+    let original_b = b.clone();
+    for (legacy, controlled) in DISTANCES.into_iter().zip(CONTROLLED) {
+        let expected = legacy(&a, &b, 0).unwrap();
+        let mut success = false;
+        for limit in 0..20_000 {
+            let execution = Execution::default().max_work(limit);
+            match controlled(&a, &b, 0, &execution) {
+                Err(error) => {
+                    assert_eq!(error, Error::WorkLimitExceeded { limit });
+                    assert_eq!(
+                        controlled(&a, &b, 0, &Execution::default()).unwrap(),
+                        expected
+                    );
+                }
+                Ok(value) => {
+                    assert!(limit > 0);
+                    assert_eq!(value, expected);
+                    assert_eq!(controlled(&a, &b, 0, &execution).unwrap(), expected);
+                    success = true;
+                    break;
+                }
+            }
+        }
+        assert!(success);
+        let flag = AtomicBool::new(true);
+        let execution = Execution::new(Some(0), Some(&flag));
+        assert_eq!(controlled(&a, &b, 0, &execution), Err(Error::Cancelled));
+        assert!(flag.load(Ordering::Relaxed));
+        assert_eq!(
+            controlled(&a, &b, 0, &Execution::default()).unwrap(),
+            expected
+        );
+        flag.store(false, Ordering::Relaxed);
+        assert_eq!(
+            controlled(&a, &b, 0, &execution),
+            Err(Error::WorkLimitExceeded { limit: 0 })
+        );
+        let cancellation = Execution::default().cancellation(&flag);
+        assert_eq!(controlled(&a, &b, 0, &cancellation).unwrap(), expected);
+        flag.store(true, Ordering::Relaxed);
+        for dimension in [0, 5] {
+            assert_eq!(
+                controlled(&diagram(&[]), &diagram(&[]), dimension, &cancellation),
+                Err(Error::Cancelled)
+            );
+        }
+        assert_eq!(
+            controlled(
+                &diagram(&[]),
+                &diagram(&[]),
+                0,
+                &Execution::default().max_work(0)
+            ),
+            Err(Error::WorkLimitExceeded { limit: 0 })
+        );
+    }
+    assert_eq!(a, original_a);
+    assert_eq!(b, original_b);
+}
+
+#[test]
+fn result_controls_preserve_context_checks_and_cover_the_operation() -> cocycle::Result<()> {
+    use cocycle::diagram::PersistenceData;
+    use cocycle::filtration::RipsBuilder;
+    use cocycle::geometry::PointCloudView;
+    use cocycle::persistence::PersistenceExt;
+    type ResultDistance = fn(&PersistenceData, &PersistenceData, usize) -> cocycle::Result<f64>;
+    type ControlledResultDistance =
+        fn(&PersistenceData, &PersistenceData, usize, &Execution<'_>) -> cocycle::Result<f64>;
+    let source = RipsBuilder::from_points(PointCloudView::new(&[0., 1., 3.], 3, 1)?);
+    let a = source.persistence().compute()?.into_data();
+    let b = source
+        .persistence()
+        .field(PrimeField::new(3)?)
+        .compute()?
+        .into_data();
+    let functions: [(ResultDistance, ControlledResultDistance); 3] = [
+        (
+            bottleneck_distance_results,
+            bottleneck_distance_results_with,
+        ),
+        (
+            wasserstein_1_infinity_results,
+            wasserstein_1_infinity_results_with,
+        ),
+        (
+            wasserstein_2_euclidean_results,
+            wasserstein_2_euclidean_results_with,
+        ),
+    ];
+    // Cancellation requested after the operation starts, during a caller's
+    // AsRef conversion, must be observed even without a work limit.
+    struct CancelOnBorrow<'a>(&'a PersistenceData, &'a AtomicBool);
+    impl AsRef<PersistenceData> for CancelOnBorrow<'_> {
+        fn as_ref(&self) -> &PersistenceData {
+            self.1.store(true, Ordering::Relaxed);
+            self.0
+        }
+    }
+    let flag = AtomicBool::new(false);
+    for distance in [
+        bottleneck_distance_results_with::<PersistenceData, CancelOnBorrow<'_>>,
+        wasserstein_1_infinity_results_with,
+        wasserstein_2_euclidean_results_with,
+    ] {
+        flag.store(false, Ordering::Relaxed);
+        assert_eq!(
+            distance(
+                &a,
+                &CancelOnBorrow(&a, &flag),
+                0,
+                &Execution::default().cancellation(&flag)
+            ),
+            Err(Error::Cancelled)
+        );
+    }
+    for (legacy, controlled) in functions {
+        for right in [&a, &b] {
+            for dim in [0, 1, 7] {
+                assert_eq!(
+                    legacy(&a, right, dim),
+                    controlled(&a, right, dim, &Execution::default())
+                );
+            }
+        }
+        let expected = legacy(&a, &a, 0)?;
+        let mut success = false;
+        for limit in 0..20_000 {
+            match controlled(&a, &a, 0, &Execution::default().max_work(limit)) {
+                Err(error) => assert_eq!(error, Error::WorkLimitExceeded { limit }),
+                Ok(value) => {
+                    assert_eq!(value, expected);
+                    success = true;
+                    break;
+                }
+            }
+            assert_eq!(controlled(&a, &a, 0, &Execution::default())?, expected);
+        }
+        assert!(success);
+        let flag = AtomicBool::new(true);
+        assert_eq!(
+            controlled(&a, &a, 0, &Execution::default().cancellation(&flag)),
+            Err(Error::Cancelled)
+        );
+        assert_eq!(controlled(&a, &a, 0, &Execution::default())?, expected);
+    }
+    Ok(())
+}
 
 #[test]
 fn distances_respect_gaps_and_selected_dimensions() -> cocycle::Result<()> {
@@ -104,6 +300,20 @@ fn compatible_results_borrow_common_data_and_keep_witness_indices() -> cocycle::
     let distance: fn(&PersistenceResult, &ResearchResult, usize) -> cocycle::Result<f64> =
         bottleneck_distance_results;
     assert_eq!(distance(&plain, &research, 0)?, 0.);
+    let execution = Execution::default();
+    assert_eq!(
+        bottleneck_distance_results_with(&plain, &research, 0, &execution)?,
+        0.
+    );
+    assert_eq!(
+        wasserstein_1_infinity_results_with(&research, &research.data, 0, &execution)?,
+        0.
+    );
+    let erased: &dyn AsRef<PersistenceData> = &research;
+    assert_eq!(
+        wasserstein_2_euclidean_results_with(erased, &plain, 0, &execution)?,
+        0.
+    );
     let mod3 = source
         .persistence()
         .field(PrimeField::new(3)?)

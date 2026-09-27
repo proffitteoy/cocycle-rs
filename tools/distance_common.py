@@ -203,34 +203,34 @@ def identity():
 
 PHASE_HOOKS = {
     'bottleneck.rs': [
-        ('fn new(points:', 'bottleneck.prepare'),
-        ('fn new(first:', 'bottleneck.pair'),
-        ('fn candidates(', 'bottleneck.candidates'),
-        ('fn solve(', 'bottleneck.total'),
+        ('fn new<const CONTROLLED: bool>(\n        points:', 'bottleneck.prepare'),
+        ('fn new<const CONTROLLED: bool>(\n        first:', 'bottleneck.pair'),
+        ('fn candidates<const CONTROLLED: bool>(', 'bottleneck.candidates'),
+        ('fn solve<const CONTROLLED: bool>(', 'bottleneck.total'),
     ],
     'bottleneck/geometry.rs': [
-        ('fn new(points:', 'bottleneck.kd_build'),
-        ('fn within(', 'bottleneck.geometry_decision'),
-        ('fn distance(', 'bottleneck.refinement'),
+        ('fn new<const CONTROLLED: bool>(\n        points:', 'bottleneck.kd_build'),
+        ('fn within<const CONTROLLED: bool>(', 'bottleneck.geometry_decision'),
+        ('fn distance<const CONTROLLED: bool>(', 'bottleneck.refinement'),
     ],
-    'bottleneck/matching.rs': [('fn within(', 'bottleneck.graph_decision')],
-    'bottleneck/flow.rs': [('fn within(', 'bottleneck.flow_decision')],
+    'bottleneck/matching.rs': [('fn within<const CONTROLLED: bool>(', 'bottleneck.graph_decision')],
+    'bottleneck/flow.rs': [('fn within<const CONTROLLED: bool>(', 'bottleneck.flow_decision')],
     'wasserstein/numeric.rs': [
-        ('fn prepare(', 'wasserstein.prepare'),
-        ('fn from_flows(', 'wasserstein.reconstruct'),
+        ('fn prepare<const CONTROLLED: bool>(', 'wasserstein.prepare'),
+        ('fn from_flows<const CONTROLLED: bool>(', 'wasserstein.reconstruct'),
     ],
     'wasserstein/graph.rs': [
-        ('fn groups(', 'wasserstein.duplicates'),
-        ('fn generate(', 'wasserstein.generate'),
-        ('fn components(', 'wasserstein.components'),
+        ('fn groups<const CONTROLLED: bool>(', 'wasserstein.duplicates'),
+        ('fn generate<const CONTROLLED: bool>(', 'wasserstein.generate'),
+        ('fn components<const CONTROLLED: bool>(', 'wasserstein.components'),
     ],
     'wasserstein/dense.rs': [
-        ('fn dense_sap(', 'wasserstein.dense_sap'),
-        ('fn tiny(', 'wasserstein.tiny'),
+        ('fn dense_sap<const CONTROLLED: bool>(', 'wasserstein.dense_sap'),
+        ('fn tiny<const CONTROLLED: bool>(', 'wasserstein.tiny'),
     ],
-    'wasserstein.rs': [('fn solve(', 'wasserstein.total')],
-    'wasserstein/sparse.rs': [('fn solve(', 'wasserstein.sparse_sap')],
-    'wasserstein/direct.rs': [('fn matching(', 'wasserstein.direct_cost_sap')],
+    'wasserstein.rs': [('fn solve<const CONTROLLED: bool>(', 'wasserstein.total')],
+    'wasserstein/sparse.rs': [('fn solve<const CONTROLLED: bool>(', 'wasserstein.sparse_sap')],
+    'wasserstein/direct.rs': [('fn matching<const CONTROLLED: bool>(', 'wasserstein.direct_cost_sap')],
 }
 
 PROFILE_SUPPORT = r'''
@@ -305,6 +305,12 @@ def profile_worker(directory):
         output.write_text(source, encoding='utf-8', newline='\n')
         originals[relative.as_posix()] = sha256(path)
         generated[relative.as_posix()] = sha256(output)
+    execution = ROOT / 'src/execution/mod.rs'
+    output = destination / 'src/execution/mod.rs'
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(execution.read_bytes())
+    originals['src/execution/mod.rs'] = sha256(execution)
+    generated['src/execution/mod.rs'] = sha256(output)
     original_worker = WORKERS / 'cocycle.rs'
     worker = destination / 'benches/distances/cocycle.rs'
     worker.parent.mkdir(parents=True)

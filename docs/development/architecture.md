@@ -138,7 +138,7 @@ files. Public paths are re-exported from domains, not every private directory.
 | `persistence` | Algorithms, options, interval and representative assembly | Algebra, geometry, filtration, diagram, execution |
 | `diagram` | Algorithm-independent result ownership and validation | Algebra field identity, filtration provenance, error utilities |
 | `descriptors` | Read diagrams without recomputing persistence | Diagram, error utilities |
-| `diagram_distances` | Match complete diagrams with bottleneck/L-infinity, W1/L-infinity or W2/Euclidean costs | Diagram and filtration scale types, error utilities |
+| `diagram_distances` | Match complete diagrams with bottleneck/L-infinity, W1/L-infinity or W2/Euclidean costs | Diagram and filtration scale types, execution, error utilities |
 
 Geometry and diagram code do not call persistence. Filtration code does not call
 persistence. Descriptors do not inspect source coordinates or algorithm state.
@@ -183,6 +183,20 @@ builders are consumed by preparation or explicit construction; analyses never
 replay them. `Execution` is shared configuration, not a shared counter. A new
 private budget spans each terminal's preparation and computation. Legacy free
 functions retain their existing persistence-only scope and test coverage.
+
+All three raw diagram distances and their context-aware adapters also have
+`_with` variants accepting `Execution`; existing entry points use its default.
+Each controlled terminal creates one `WorkBudget` and passes it through context
+checks, interval extraction, preparation, candidate/graph construction, every
+matching route and final accumulation. Batched charges bound algorithm work;
+cooperative checks return `Cancelled` or `WorkLimitExceeded`, never a partial
+distance. Counts depend on the route and are not timings or bytes. Sorting,
+selection, allocation and external callbacks remain indivisible. Neither
+workspace/RSS quotas nor thread controls are promised. Test-only cancellation
+hooks are absent from ordinary and standalone benchmark builds.
+The private budget has a compile-time unlimited mode selected only when both
+controls are absent, so default distance kernels omit polling branches. This
+specialization shares the same matching code and does not change route policy.
 
 ## Computation path
 

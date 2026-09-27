@@ -3,7 +3,7 @@
 #[cfg(any(test, cocycle_distance_bench))]
 use super::bytes;
 use super::{Diagnostics, NONE, Pair, filled, push, reserve, size_overflow};
-use crate::Result;
+use crate::{Result, execution::WorkBudget};
 
 struct Graph {
     size: usize,
@@ -22,7 +22,13 @@ struct Cursor {
 }
 
 impl Graph {
-    fn new(pair: &Pair<'_, '_>, radius: f64, _stats: &mut Diagnostics) -> Result<Self> {
+    fn new<const CONTROLLED: bool>(
+        pair: &Pair<'_, '_>,
+        radius: f64,
+        _stats: &mut Diagnostics,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<Self> {
+        budget.check()?;
         let size = pair.size;
         let words = if size < 128 { size.div_ceil(64) } else { 0 };
         let mut result = Self {
@@ -41,12 +47,15 @@ impl Graph {
         let n = pair.first.points.len();
         let m = pair.second.points.len();
         for left in 0..size {
+            budget.step()?;
             if words == 0 {
                 result.offsets.push(result.neighbors.len());
             }
             if left < n {
                 if words == 0 {
-                    for position in pair.second.window(pair.first.points[left][0], radius) {
+                    let window = pair.second.window(pair.first.points[left][0], radius);
+                    budget.step_by(window.len())?;
+                    for position in window {
                         let right = pair.second.order[position];
                         record! { _stats.adjacency_checks += 1; }
                         if pair.cross(left, right) <= radius {
@@ -54,6 +63,7 @@ impl Graph {
                         }
                     }
                 } else {
+                    budget.step_by(m)?;
                     for right in 0..m {
                         record! { _stats.adjacency_checks += 1; }
                         if pair.cross(left, right) <= radius {
@@ -69,6 +79,7 @@ impl Graph {
                 if pair.second.diagonals[point] <= radius {
                     result.add(left, point)?;
                 }
+                budget.step_by(size - m)?;
                 for right in m..size {
                     result.add(left, right)?;
                 }
@@ -182,14 +193,15 @@ impl Workspace {
         })
     }
 
-    pub(super) fn within(
+    pub(super) fn within<const CONTROLLED: bool>(
         &mut self,
         pair: &Pair<'_, '_>,
         radius: f64,
         _stats: &mut Diagnostics,
         _outer_bytes: usize,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
     ) -> Result<bool> {
-        let graph = Graph::new(pair, radius, _stats)?;
+        let graph = Graph::new(pair, radius, _stats, budget)?;
         record! { _stats.workspace(
             _outer_bytes
                 .saturating_add(graph.bytes())
@@ -201,16 +213,23 @@ impl Workspace {
             }
             self.used = true;
         }
+        budget.step_by(graph.size)?;
         self.left.fill(NONE);
         self.right.fill(NONE);
         self.seen.fill(0);
         for vertex in 0..graph.size {
+            if CONTROLLED && vertex % 256 == 0 {
+                budget.step_by((graph.size - vertex).min(256))?;
+            }
             self.order[vertex] = vertex;
             self.degrees[vertex] = graph.degree(vertex);
         }
         self.order
             .sort_unstable_by_key(|&vertex| (self.degrees[vertex], vertex));
         for &left in &self.order {
+            if CONTROLLED {
+                budget.step_by(self.degrees[left].max(1))?;
+            }
             let mut cursor = graph.cursor(left);
             while let Some(right) = graph.next(&mut cursor) {
                 if self.right[right] == NONE {
@@ -221,6 +240,7 @@ impl Workspace {
             }
         }
         for position in 0..graph.size {
+            budget.step()?;
             let left = self.order[position];
             if self.left[left] != NONE {
                 continue;
@@ -236,6 +256,7 @@ impl Workspace {
             });
             let mut augmented = false;
             while let Some(frame) = self.stack.last_mut() {
+                budget.step()?;
                 let Some(right) = graph.next(&mut frame.cursor) else {
                     self.stack.pop();
                     continue;
@@ -247,6 +268,7 @@ impl Workspace {
                 let previous = self.right[right];
                 if previous == NONE {
                     let mut assign = right;
+                    budget.step_by(self.stack.len())?;
                     for frame in self.stack.iter().rev() {
                         self.left[frame.left] = assign;
                         self.right[assign] = frame.left;

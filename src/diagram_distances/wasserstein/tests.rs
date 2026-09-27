@@ -1,4 +1,107 @@
 use super::*;
+use crate::execution::Execution;
+
+fn unlimited() -> WorkBudget<'static> {
+    WorkBudget::new(&Execution::default()).unwrap()
+}
+
+#[test]
+fn execution_controls_cover_dense_sparse_components_duplicates_and_fallback() {
+    use crate::diagram_distances::tests::check_control;
+    let first = [[0., 5.], [0.5, 5.5], [1., 4.], [2., 6.]];
+    let second = [[0.2, 4.8], [0.6, 5.6], [0.9, 4.5], [2.2, 6.]];
+    for metric in [Metric::W1, Metric::W2] {
+        let a = prepare(&first, 1., &mut unlimited()).unwrap();
+        let b = prepare(&second, 1., &mut unlimited()).unwrap();
+        let graph = generate(&a, &b, metric, &mut Stats::default(), &mut unlimited()).unwrap();
+        // Private stage tests cannot pass merely because the facade checks once.
+        for row_reduction in [false, true] {
+            check_control(|budget| dense_sap(&graph, row_reduction, &mut Stats::default(), budget));
+        }
+        for layout in [SparseLayout::Vectors, SparseLayout::Arena] {
+            check_control(|budget| {
+                sparse::solve(&graph, None, layout, &mut Stats::default(), budget)
+            });
+            let options = Options {
+                force_sparse: true,
+                sparse: layout,
+            };
+            check_control(|budget| {
+                solve(
+                    &first,
+                    &second,
+                    metric,
+                    options,
+                    &mut Stats::default(),
+                    budget,
+                )
+            });
+        }
+        check_control(|budget| direct::matching(&a, &b, metric, &mut Stats::default(), budget));
+        check_control(|budget| tiny(&graph, budget));
+
+        let first: Vec<_> = (0..40)
+            .map(|i| [i as f64 * 10., i as f64 * 10. + 2.])
+            .collect();
+        let second: Vec<_> = first.iter().map(|p| [p[0] + 0.25, p[1] + 0.25]).collect();
+        let mut stats = Stats::default();
+        solve(
+            &first,
+            &second,
+            metric,
+            Options::default(),
+            &mut stats,
+            &mut unlimited(),
+        )
+        .unwrap();
+        assert!(stats.components > 0);
+        check_control(|budget| {
+            solve(
+                &first,
+                &second,
+                metric,
+                Options::default(),
+                &mut Stats::default(),
+                budget,
+            )
+        });
+
+        let first = vec![[0., 4.]; 64];
+        let second = vec![[0.25, 4.25]; 60];
+        check_control(|budget| {
+            solve(
+                &first,
+                &second,
+                metric,
+                Options::default(),
+                &mut Stats::default(),
+                budget,
+            )
+        });
+        let second = vec![[1e-16, 4.]; 64];
+        let mut stats = Stats::default();
+        solve(
+            &first,
+            &second,
+            metric,
+            Options::default(),
+            &mut stats,
+            &mut unlimited(),
+        )
+        .unwrap();
+        assert!(stats.direct_cost_fallbacks > 0);
+        check_control(|budget| {
+            solve(
+                &first,
+                &second,
+                metric,
+                Options::default(),
+                &mut Stats::default(),
+                budget,
+            )
+        });
+    }
+}
 
 // This independent oracle enumerates partial point-to-point bijections and
 // charges remaining points directly to the diagonal, without a saving graph.
@@ -98,7 +201,10 @@ fn all_matchers_agree_with_independent_small_oracle() {
             .collect();
         for metric in [Metric::W1, Metric::W2] {
             let expected = exhaustive(&first, &second, metric);
-            assert_close(distance(&first, &second, metric).unwrap(), expected);
+            assert_close(
+                distance(&first, &second, metric, &mut unlimited()).unwrap(),
+                expected,
+            );
             for sparse in [SparseLayout::Vectors, SparseLayout::Arena] {
                 let actual = distance_with_options(
                     &first,
@@ -127,19 +233,33 @@ fn all_matchers_agree_with_independent_small_oracle() {
                     expected,
                 );
             }
-            let a = prepare(&first, 1.0).unwrap();
-            let b = prepare(&second, 1.0).unwrap();
-            let graph = generate(&a, &b, metric, &mut Stats::default()).unwrap();
+            let a = prepare(&first, 1.0, &mut unlimited()).unwrap();
+            let b = prepare(&second, 1.0, &mut unlimited()).unwrap();
+            let graph = generate(&a, &b, metric, &mut Stats::default(), &mut unlimited()).unwrap();
             for row_reduction in [false, true] {
-                let matching = dense_sap(&graph, row_reduction, &mut Stats::default()).unwrap();
+                let matching = dense_sap(
+                    &graph,
+                    row_reduction,
+                    &mut Stats::default(),
+                    &mut unlimited(),
+                )
+                .unwrap();
                 let flows: Vec<_> = matching
                     .into_iter()
                     .enumerate()
                     .filter_map(|(r, c)| c.map(|c| (r, c, 1)))
                     .collect();
                 assert_close(
-                    from_flows(&a, &b, &vec![1; a.len()], &vec![1; b.len()], &flows, metric)
-                        .unwrap(),
+                    from_flows(
+                        &a,
+                        &b,
+                        &vec![1; a.len()],
+                        &vec![1; b.len()],
+                        &flows,
+                        metric,
+                        &mut unlimited(),
+                    )
+                    .unwrap(),
                     expected,
                 );
             }
@@ -257,7 +377,7 @@ fn original_cost_reconstruction_avoids_w2_saving_cancellation() {
     let epsilon = 2.0_f64.powi(-40);
     let first = [[0.0, 2.0]];
     let second = [[epsilon, 2.0 + epsilon]];
-    let actual = distance(&first, &second, Metric::W2).unwrap();
+    let actual = distance(&first, &second, Metric::W2, &mut unlimited()).unwrap();
     assert_eq!(actual, epsilon * 2.0_f64.sqrt());
 }
 
@@ -265,11 +385,16 @@ fn original_cost_reconstruction_avoids_w2_saving_cancellation() {
 fn adjacent_floats_have_the_mathematical_diagonal_cost() {
     let death = f64::from_bits(1.0_f64.to_bits() + 1);
     assert_eq!(
-        distance(&[[1.0, death]], &[], Metric::W1).unwrap(),
+        distance(&[[1.0, death]], &[], Metric::W1, &mut unlimited()).unwrap(),
         f64::EPSILON / 2.0
     );
     assert!(matches!(
-        distance(&[[0.0, f64::from_bits(1)]], &[], Metric::W1),
+        distance(
+            &[[0.0, f64::from_bits(1)]],
+            &[],
+            Metric::W1,
+            &mut unlimited()
+        ),
         Err(Error::NumericalFailure { .. })
     ));
 }
@@ -328,7 +453,7 @@ fn near_identical_multisets_match_independent_original_cost_oracle() {
             .collect();
         for metric in [Metric::W1, Metric::W2] {
             let expected = exhaustive(&a, &b, metric);
-            let actual = distance(&a, &b, metric).unwrap();
+            let actual = distance(&a, &b, metric, &mut unlimited()).unwrap();
             assert!(
                 (actual - expected).abs() <= 16.0 * f64::EPSILON * expected,
                 "{metric:?}: {actual} != {expected}; {a:?}, {b:?}"
@@ -365,7 +490,7 @@ fn guarded_sweep_preserves_ulp_sized_blocks_at_large_offsets() {
             b.extend(second);
         }
         for (metric, expected) in [(Metric::W1, expected[0]), (Metric::W2, expected[1].sqrt())] {
-            let actual = distance(&a, &b, metric).unwrap();
+            let actual = distance(&a, &b, metric, &mut unlimited()).unwrap();
             assert!(
                 (actual - expected).abs() <= 16.0 * f64::EPSILON * expected,
                 "{metric:?}: {actual} != {expected} at base {base}"
@@ -392,7 +517,7 @@ fn scalar_and_sweep_routes_agree_with_forced_residual_solvers() {
             })
             .collect();
         for metric in [Metric::W1, Metric::W2] {
-            let expected = distance(&first, &second, metric).unwrap();
+            let expected = distance(&first, &second, metric, &mut unlimited()).unwrap();
             for sparse in [SparseLayout::Vectors, SparseLayout::Arena] {
                 assert_close(
                     distance_with_options(
@@ -417,21 +542,26 @@ fn scalar_and_sweep_routes_agree_with_forced_residual_solvers() {
 fn power_of_two_scaling_preserves_extreme_representable_answers() {
     let maximum = f64::MAX;
     assert_eq!(
-        distance(&[[-maximum, maximum]], &[], Metric::W1).unwrap(),
+        distance(&[[-maximum, maximum]], &[], Metric::W1, &mut unlimited()).unwrap(),
         maximum
     );
     assert!(matches!(
-        distance(&[[-maximum, maximum]], &[], Metric::W2),
+        distance(&[[-maximum, maximum]], &[], Metric::W2, &mut unlimited()),
         Err(Error::NumericalFailure { .. })
     ));
     for lifetime in [1e200, 1e-200, f64::MIN_POSITIVE] {
-        let actual = distance(&[[0.0, lifetime]], &[], Metric::W2).unwrap();
+        let actual = distance(&[[0.0, lifetime]], &[], Metric::W2, &mut unlimited()).unwrap();
         let expected = lifetime / 2.0_f64.sqrt();
         assert!(actual > 0.0);
         assert!((actual / expected - 1.0).abs() <= 4.0 * f64::EPSILON);
     }
     assert!(matches!(
-        distance(&[[0.0, 1e-300], [0.0, 1e300]], &[], Metric::W2),
+        distance(
+            &[[0.0, 1e-300], [0.0, 1e300]],
+            &[],
+            Metric::W2,
+            &mut unlimited()
+        ),
         Err(Error::NumericalFailure { .. })
     ));
 }

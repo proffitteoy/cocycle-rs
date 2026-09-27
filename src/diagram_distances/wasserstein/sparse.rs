@@ -9,6 +9,7 @@ use std::collections::BinaryHeap;
 #[cfg(any(test, cocycle_distance_bench))]
 use super::capacity_bytes;
 use super::{Graph, SparseLayout, Stats, allocation, buffer, finite, numerical, push, sum_size};
+use crate::execution::WorkBudget;
 use crate::{Error, Result};
 
 #[derive(Clone, Copy, Default)]
@@ -188,14 +189,15 @@ impl Scratch {
     }
 }
 
-pub(super) fn solve(
+pub(super) fn solve<const CONTROLLED: bool>(
     graph: &Graph,
     capacities: Option<(&[usize], &[usize])>,
     layout: SparseLayout,
     _stats: &mut Stats,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
 ) -> Result<Vec<(usize, usize, usize)>> {
     record! { _stats.sparse_solves += 1; }
-    let (rows, columns) = graph.active()?;
+    let (rows, columns) = graph.active(budget)?;
     if rows.is_empty() || columns.is_empty() {
         return Ok(Vec::new());
     }
@@ -205,6 +207,7 @@ pub(super) fn solve(
     let column_base = sum_size(row_base, rows.len())?;
     let sink = sum_size(column_base, columns.len())?;
     let nodes = sum_size(sink, 1)?;
+    budget.step_by(nodes)?;
     let mut row_map = buffer(graph.rows, usize::MAX)?;
     let mut column_map = buffer(graph.columns, usize::MAX)?;
     for (i, &row) in rows.iter().enumerate() {
@@ -220,6 +223,9 @@ pub(super) fn solve(
         degree[0] = rows.len();
         degree[sink] = columns.len();
         for &row in &rows {
+            if CONTROLLED {
+                budget.step_by(graph.row_work(row))?;
+            }
             let node = row_base + row_map[row];
             degree[node] = 1;
             for edge in graph.edges(row) {
@@ -235,6 +241,7 @@ pub(super) fn solve(
     } else {
         degree
     };
+    budget.step_by(nodes)?;
     let mut network = Network::new(nodes, &degree, layout)?;
     let mut cursor = buffer(nodes, 0)?;
     for (i, &row) in rows.iter().enumerate() {
@@ -251,6 +258,9 @@ pub(super) fn solve(
     }
     let mut potential = buffer(nodes, 0.0_f64)?;
     for &row in &rows {
+        if CONTROLLED {
+            budget.step_by(graph.row_work(row))?;
+        }
         let node = row_base + row_map[row];
         for edge in graph.edges(row) {
             let other = column_base + column_map[edge.column];
@@ -278,16 +288,17 @@ pub(super) fn solve(
     if let Network::Arena { edges, .. } = &network {
         // Match the pinned arena experiment's bounded initial heap reservation.
         // Both capacity and reuse belong to this layout ablation, not R0.
-        let budget = nodes.checked_mul(8).ok_or(Error::SizeOverflow {
+        let heap_reservation = nodes.checked_mul(8).ok_or(Error::SizeOverflow {
             operation: "Wasserstein arena heap reservation",
         })?;
         scratch
             .heap
-            .try_reserve_exact(edges.len().min(budget))
+            .try_reserve_exact(edges.len().min(heap_reservation))
             .map_err(|_| allocation())?;
     }
     let mut iteration = 0;
     loop {
+        budget.step_by(nodes)?;
         if iteration != 0 {
             if experiment!(layout == SparseLayout::Arena, false) {
                 record! { scratch.reset(); }
@@ -300,6 +311,9 @@ pub(super) fn solve(
         scratch.distance[0] = 0.0;
         scratch.enqueue(0.0, 0)?;
         while let Some(QueueItem { distance, node }) = scratch.heap.pop() {
+            if CONTROLLED {
+                budget.step_by(network.edges(node).len().max(1))?;
+            }
             if distance != scratch.distance[node] {
                 continue;
             }
@@ -338,6 +352,7 @@ pub(super) fn solve(
         if path_cost >= 0.0 {
             break;
         }
+        budget.step_by(nodes)?;
         for (node, value) in potential.iter_mut().enumerate() {
             if scratch.distance[node].is_finite() {
                 *value = finite(*value + scratch.distance[node])?;
@@ -347,6 +362,7 @@ pub(super) fn solve(
         let mut node = sink;
         let mut hops = 0;
         while node != 0 {
+            budget.step()?;
             let parent = scratch.previous_node[node];
             if parent == usize::MAX || hops >= nodes {
                 return Err(Error::InternalInvariant {
@@ -359,6 +375,7 @@ pub(super) fn solve(
         }
         node = sink;
         while node != 0 {
+            budget.step()?;
             let parent = scratch.previous_node[node];
             let index = scratch.previous_edge[node];
             let edge = network.edge_mut(parent, index);
@@ -372,6 +389,9 @@ pub(super) fn solve(
     }
     let mut flows = Vec::new();
     for (local, &row) in rows.iter().enumerate() {
+        if CONTROLLED {
+            budget.step_by(network.edges(row_base + local).len().max(1))?;
+        }
         for edge in network.edges(row_base + local) {
             if edge.destination < column_base || edge.destination >= sink {
                 continue;

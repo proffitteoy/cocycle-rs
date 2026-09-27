@@ -241,6 +241,40 @@ representatives. Raw-diagram descriptors remain usable directly on `data.diagram
 See the [migration notes](../design/kernel.md#result-api-migration) for changed
 maximum-dimension semantics and generic distance signatures.
 
+The three raw functions and three `_results` adapters each have a `_with`
+variant taking `&Execution`. Existing calls equal calls with
+`Execution::default()`. For example:
+
+```rust
+use cocycle::{Error, execution::Execution};
+use cocycle::diagram::{Coverage, PersistenceDiagram};
+use cocycle::diagram_distances::bottleneck_distance_with;
+use std::sync::atomic::AtomicBool;
+
+let diagram = PersistenceDiagram::new(0, Coverage::Complete, vec![])?;
+let cancelled = AtomicBool::new(true);
+let execution = Execution::default().max_work(10_000).cancellation(&cancelled);
+assert_eq!(bottleneck_distance_with(&diagram, &diagram, 0, &execution),
+           Err(Error::Cancelled));
+assert_eq!(bottleneck_distance_with(&diagram, &diagram, 0, &Execution::default())?, 0.);
+# Ok::<(), cocycle::Error>(())
+```
+
+Long-running matching algorithms must cooperate with execution control. Pass the
+same private budget through preparation, matching and accumulation, including
+fallbacks and components; never restart it at a phase boundary. Charge batches
+or rows outside hot inner loops where possible, with periodic cancellation checks
+inside real work. Do not expose algorithm routing as a public resource option.
+Work counts are implementation-dependent, not milliseconds or workspace bytes;
+there is no memory/RSS quota or thread pool. Pre-cancellation precedes validation,
+and subsequent errors occur in execution order. Sorting, selection, allocation
+and `AsRef` callbacks cannot be interrupted internally.
+
+Test default equivalence, budget exhaustion, cancellation after actual kernel
+work, all matching routes and recovery on the same immutable inputs. Discover
+budget thresholds rather than hard-code counts. Measure unlimited-path overhead
+on fixed fixtures, and preserve mathematical/context error semantics.
+
 Put public contracts and hand-derived cases in `tests/diagram_distances.rs`.
 Use the private kernel tests for matching invariants and an independent exhaustive
 oracle. Test ties, multiplicity, diagonal costs, essential points, numerical

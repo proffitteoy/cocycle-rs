@@ -8,12 +8,14 @@
 
 use super::{Metric, Point, Stats, buffer, cross_power, diagonal_power, finite, sum_size};
 use crate::Result;
+use crate::execution::WorkBudget;
 
-pub(super) fn matching(
+pub(super) fn matching<const CONTROLLED: bool>(
     first: &[Point],
     second: &[Point],
     metric: Metric,
     _stats: &mut Stats,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
 ) -> Result<Vec<Option<usize>>> {
     record! { _stats.direct_cost_fallbacks += 1; }
     record! { _stats.dense_solves += 1; }
@@ -41,11 +43,13 @@ pub(super) fn matching(
     let mut distance = buffer(length, f64::INFINITY)?;
     let mut seen = buffer(length, false)?;
     for row in 1..=size {
+        budget.step_by(length)?;
         matched_row[0] = row;
         distance.fill(f64::INFINITY);
         seen.fill(false);
         let mut column = 0;
         loop {
+            budget.step_by(length)?;
             seen[column] = true;
             let current_row = matched_row[column];
             let mut delta = f64::INFINITY;
@@ -69,6 +73,7 @@ pub(super) fn matching(
                 }
             }
             finite(delta)?;
+            budget.step_by(length)?;
             for candidate in 0..=size {
                 if seen[candidate] {
                     row_potential[matched_row[candidate]] =
@@ -84,6 +89,7 @@ pub(super) fn matching(
             }
         }
         loop {
+            budget.step()?;
             let previous = predecessor[column];
             matched_row[column] = matched_row[previous];
             column = previous;
@@ -94,6 +100,7 @@ pub(super) fn matching(
         record! { _stats.augmentations += 1; }
     }
     let mut matching = buffer(first.len(), None)?;
+    budget.step_by(size)?;
     for (column, &row) in matched_row
         .iter()
         .enumerate()

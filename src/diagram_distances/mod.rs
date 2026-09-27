@@ -19,6 +19,25 @@
 //! approximations describe the two supplied diagrams, not the unknown original
 //! diagrams and not an approximation error certificate.
 //!
+//! # Execution controls
+//!
+//! Each raw and context-aware function has a `_with` variant accepting
+//! [`Execution`]. Existing functions use `Execution::default()`. One fresh private
+//! budget spans context/coverage validation, interval extraction, preparation,
+//! candidates, all matching routes and accumulation. Counted work includes
+//! intervals, candidate or graph rows, search visits and batches; repeated scans
+//! count again. Counts are algorithm-dependent, not timings, bytes or a stable
+//! performance score. A zero budget rejects even an empty distance operation.
+//!
+//! A pre-set cancellation flag is checked before validation or extraction;
+//! otherwise validation and resource errors occur in execution order. Long loops
+//! poll at row, visit or batch boundaries. Sorting, selection, allocations and
+//! user `AsRef` callbacks cannot be interrupted internally; cancellation is
+//! cooperative, without a hard latency guarantee. A resource error returns no
+//! partial distance and changes neither input nor the caller's flag. Each retry
+//! starts fresh. Workspace quotas and internal parallelism controls are outside
+//! this API; matching routes and scratch remain private.
+//!
 //! ```
 //! use cocycle::diagram::{Coverage, IntervalEnd, PersistenceDiagram, PersistenceInterval};
 //! use cocycle::diagram_distances::{bottleneck_distance, wasserstein_2_euclidean};
@@ -32,6 +51,7 @@
 //! ```
 
 use crate::diagram::{Coverage, IntervalEnd, PersistenceData, PersistenceDiagram};
+use crate::execution::{Execution, WorkBudget};
 use crate::{Error, Result};
 
 // The standalone worker opts in with --cfg cocycle_distance_bench. Neither
@@ -74,7 +94,23 @@ pub fn bottleneck_distance(
     second: &PersistenceDiagram,
     dimension: usize,
 ) -> Result<f64> {
-    distance(first, second, dimension, Kind::Bottleneck)
+    bottleneck_distance_with(first, second, dimension, &Execution::default())
+}
+
+/// Bottleneck distance with cooperative work and cancellation controls.
+///
+/// One budget covers validation, point preparation, matching and accumulation.
+/// See the module's execution contract for counted work and cancellation limits.
+/// # Errors
+/// Includes [`bottleneck_distance`] errors, [`Error::Cancelled`] and
+/// [`Error::WorkLimitExceeded`]. No partial distance is returned.
+pub fn bottleneck_distance_with(
+    first: &PersistenceDiagram,
+    second: &PersistenceDiagram,
+    dimension: usize,
+    execution: &Execution<'_>,
+) -> Result<f64> {
+    distance_with(first, second, dimension, Kind::Bottleneck, execution)
 }
 
 /// Exact order-one Wasserstein distance, with pointwise L-infinity cost.
@@ -90,7 +126,20 @@ pub fn wasserstein_1_infinity(
     second: &PersistenceDiagram,
     dimension: usize,
 ) -> Result<f64> {
-    distance(first, second, dimension, Kind::W1)
+    wasserstein_1_infinity_with(first, second, dimension, &Execution::default())
+}
+
+/// W1-L-infinity distance with the execution contract of [`bottleneck_distance_with`].
+/// # Errors
+/// Includes [`wasserstein_1_infinity`] errors, [`Error::Cancelled`] and
+/// [`Error::WorkLimitExceeded`]. No partial distance is returned.
+pub fn wasserstein_1_infinity_with(
+    first: &PersistenceDiagram,
+    second: &PersistenceDiagram,
+    dimension: usize,
+    execution: &Execution<'_>,
+) -> Result<f64> {
+    distance_with(first, second, dimension, Kind::W1, execution)
 }
 
 /// Exact order-two Wasserstein distance, with pointwise Euclidean cost.
@@ -106,7 +155,20 @@ pub fn wasserstein_2_euclidean(
     second: &PersistenceDiagram,
     dimension: usize,
 ) -> Result<f64> {
-    distance(first, second, dimension, Kind::W2)
+    wasserstein_2_euclidean_with(first, second, dimension, &Execution::default())
+}
+
+/// W2-Euclidean distance with the execution contract of [`bottleneck_distance_with`].
+/// # Errors
+/// Includes [`wasserstein_2_euclidean`] errors, [`Error::Cancelled`] and
+/// [`Error::WorkLimitExceeded`]. No partial distance is returned.
+pub fn wasserstein_2_euclidean_with(
+    first: &PersistenceDiagram,
+    second: &PersistenceDiagram,
+    dimension: usize,
+    execution: &Execution<'_>,
+) -> Result<f64> {
+    distance_with(first, second, dimension, Kind::W2, execution)
 }
 
 /// Bottleneck distance with additional computation-context validation.
@@ -136,7 +198,26 @@ where
     L: AsRef<PersistenceData> + ?Sized,
     R: AsRef<PersistenceData> + ?Sized,
 {
-    distance_results(first.as_ref(), second.as_ref(), dimension, Kind::Bottleneck)
+    bottleneck_distance_results_with(first, second, dimension, &Execution::default())
+}
+
+/// Context-checked bottleneck distance with one cooperative operation budget.
+///
+/// Borrows stored common data just like [`bottleneck_distance_results`].
+/// # Errors
+/// Includes [`bottleneck_distance_results`] errors, [`Error::Cancelled`] and
+/// [`Error::WorkLimitExceeded`]. No partial distance is returned.
+pub fn bottleneck_distance_results_with<L, R>(
+    first: &L,
+    second: &R,
+    dimension: usize,
+    execution: &Execution<'_>,
+) -> Result<f64>
+where
+    L: AsRef<PersistenceData> + ?Sized,
+    R: AsRef<PersistenceData> + ?Sized,
+{
+    distance_results_with(first, second, dimension, Kind::Bottleneck, execution)
 }
 
 /// W1-L-infinity distance with the context checks of [`bottleneck_distance_results`].
@@ -149,7 +230,24 @@ where
     L: AsRef<PersistenceData> + ?Sized,
     R: AsRef<PersistenceData> + ?Sized,
 {
-    distance_results(first.as_ref(), second.as_ref(), dimension, Kind::W1)
+    wasserstein_1_infinity_results_with(first, second, dimension, &Execution::default())
+}
+
+/// Context-checked W1 with the controls of [`bottleneck_distance_results_with`].
+/// # Errors
+/// Includes [`wasserstein_1_infinity_results`] errors, [`Error::Cancelled`] and
+/// [`Error::WorkLimitExceeded`]. No partial distance is returned.
+pub fn wasserstein_1_infinity_results_with<L, R>(
+    first: &L,
+    second: &R,
+    dimension: usize,
+    execution: &Execution<'_>,
+) -> Result<f64>
+where
+    L: AsRef<PersistenceData> + ?Sized,
+    R: AsRef<PersistenceData> + ?Sized,
+{
+    distance_results_with(first, second, dimension, Kind::W1, execution)
 }
 
 /// W2-Euclidean distance with the context checks of [`bottleneck_distance_results`].
@@ -162,7 +260,24 @@ where
     L: AsRef<PersistenceData> + ?Sized,
     R: AsRef<PersistenceData> + ?Sized,
 {
-    distance_results(first.as_ref(), second.as_ref(), dimension, Kind::W2)
+    wasserstein_2_euclidean_results_with(first, second, dimension, &Execution::default())
+}
+
+/// Context-checked W2 with the controls of [`bottleneck_distance_results_with`].
+/// # Errors
+/// Includes [`wasserstein_2_euclidean_results`] errors, [`Error::Cancelled`] and
+/// [`Error::WorkLimitExceeded`]. No partial distance is returned.
+pub fn wasserstein_2_euclidean_results_with<L, R>(
+    first: &L,
+    second: &R,
+    dimension: usize,
+    execution: &Execution<'_>,
+) -> Result<f64>
+where
+    L: AsRef<PersistenceData> + ?Sized,
+    R: AsRef<PersistenceData> + ?Sized,
+{
+    distance_results_with(first, second, dimension, Kind::W2, execution)
 }
 
 #[derive(Clone, Copy)]
@@ -172,12 +287,69 @@ enum Kind {
     W2,
 }
 
+fn distance_with(
+    first: &PersistenceDiagram,
+    second: &PersistenceDiagram,
+    dimension: usize,
+    kind: Kind,
+    execution: &Execution<'_>,
+) -> Result<f64> {
+    if execution.is_unlimited() {
+        distance(first, second, dimension, kind, &mut WorkBudget::unlimited())
+    } else {
+        distance(
+            first,
+            second,
+            dimension,
+            kind,
+            &mut WorkBudget::new(execution)?,
+        )
+    }
+}
+
+fn distance_results_with<L, R>(
+    first: &L,
+    second: &R,
+    dimension: usize,
+    kind: Kind,
+    execution: &Execution<'_>,
+) -> Result<f64>
+where
+    L: AsRef<PersistenceData> + ?Sized,
+    R: AsRef<PersistenceData> + ?Sized,
+{
+    if execution.is_unlimited() {
+        distance_results(
+            first.as_ref(),
+            second.as_ref(),
+            dimension,
+            kind,
+            &mut WorkBudget::unlimited(),
+        )
+    } else {
+        // Check cancellation before invoking caller-provided conversion code.
+        let mut budget = WorkBudget::new(execution)?;
+        distance_results(
+            first.as_ref(),
+            second.as_ref(),
+            dimension,
+            kind,
+            &mut budget,
+        )
+    }
+}
+
 struct Points {
     finite: Vec<[f64; 2]>,
     essential: Vec<f64>,
 }
 
-fn points(diagram: &PersistenceDiagram, dimension: usize) -> Result<Points> {
+fn points<const CONTROLLED: bool>(
+    diagram: &PersistenceDiagram,
+    dimension: usize,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
+) -> Result<Points> {
+    budget.step()?;
     let view = diagram.dimension(dimension)?;
     if let Coverage::Through(through) = diagram.coverage() {
         return Err(Error::IncompleteDiagram { through });
@@ -185,6 +357,7 @@ fn points(diagram: &PersistenceDiagram, dimension: usize) -> Result<Points> {
     let mut finite = Vec::new();
     let mut essential = Vec::new();
     for interval in view.iter() {
+        budget.step()?;
         match interval.end() {
             IntervalEnd::Finite(death) => {
                 finite.try_reserve(1).map_err(|_| Error::AllocationFailed {
@@ -210,42 +383,62 @@ fn points(diagram: &PersistenceDiagram, dimension: usize) -> Result<Points> {
     Ok(Points { finite, essential })
 }
 
-fn distance(
+fn distance<const CONTROLLED: bool>(
     first: &PersistenceDiagram,
     second: &PersistenceDiagram,
     dimension: usize,
     kind: Kind,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
 ) -> Result<f64> {
-    let first = points(first, dimension)?;
-    let second = points(second, dimension)?;
+    let first = points(first, dimension, budget)?;
+    let second = points(second, dimension, budget)?;
+    budget.check()?;
     if first.essential.len() != second.essential.len() {
         return Ok(f64::INFINITY);
     }
     let finite = match kind {
-        Kind::Bottleneck => bottleneck::distance(&first.finite, &second.finite)?,
-        Kind::W1 => wasserstein::distance(&first.finite, &second.finite, wasserstein::Metric::W1)?,
-        Kind::W2 => wasserstein::distance(&first.finite, &second.finite, wasserstein::Metric::W2)?,
+        Kind::Bottleneck => bottleneck::distance(&first.finite, &second.finite, budget)?,
+        Kind::W1 => wasserstein::distance(
+            &first.finite,
+            &second.finite,
+            wasserstein::Metric::W1,
+            budget,
+        )?,
+        Kind::W2 => wasserstein::distance(
+            &first.finite,
+            &second.finite,
+            wasserstein::Metric::W2,
+            budget,
+        )?,
     };
     let mut value = finite;
     let mut compensation = 0.0;
-    for (&left, &right) in first.essential.iter().zip(&second.essential) {
-        let cost = (left - right).abs();
-        if !cost.is_finite() {
-            return Err(Error::NumericalFailure {
-                context: "essential point distance",
-            });
-        }
-        value = match kind {
-            Kind::Bottleneck => value.max(cost),
-            Kind::W1 => {
-                let corrected = cost - compensation;
-                let sum = value + corrected;
-                compensation = (sum - value) - corrected;
-                sum
+    for (left, right) in first
+        .essential
+        .chunks(256)
+        .zip(second.essential.chunks(256))
+    {
+        budget.step_by(left.len())?;
+        for (&left, &right) in left.iter().zip(right) {
+            let cost = (left - right).abs();
+            if !cost.is_finite() {
+                return Err(Error::NumericalFailure {
+                    context: "essential point distance",
+                });
             }
-            Kind::W2 => value.hypot(cost),
-        };
+            value = match kind {
+                Kind::Bottleneck => value.max(cost),
+                Kind::W1 => {
+                    let corrected = cost - compensation;
+                    let sum = value + corrected;
+                    compensation = (sum - value) - corrected;
+                    sum
+                }
+                Kind::W2 => value.hypot(cost),
+            };
+        }
     }
+    budget.check()?;
     if !value.is_finite() {
         return Err(Error::NumericalFailure {
             context: "diagram distance accumulation",
@@ -254,14 +447,16 @@ fn distance(
     Ok(if value == 0.0 { 0.0 } else { value })
 }
 
-fn distance_results(
+fn distance_results<const CONTROLLED: bool>(
     first: &PersistenceData,
     second: &PersistenceData,
     dimension: usize,
     kind: Kind,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
 ) -> Result<f64> {
+    budget.step()?;
     check_context(first, second)?;
-    distance(first.diagram(), second.diagram(), dimension, kind)
+    distance(first.diagram(), second.diagram(), dimension, kind, budget)
 }
 
 fn check_context(first: &PersistenceData, second: &PersistenceData) -> Result<()> {
@@ -286,4 +481,107 @@ fn check_context(first: &PersistenceData, second: &PersistenceData) -> Result<()
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fmt::Debug;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    // Exercise an actual kernel/stage rather than stopping at the public facade.
+    // Discover work dynamically; no algorithm's incidental count is frozen.
+    pub(super) fn check_control<T: PartialEq + Debug>(
+        mut run: impl FnMut(&mut WorkBudget<'_>) -> Result<T>,
+    ) {
+        let mut counted = WorkBudget::new(&Execution::default().max_work(u64::MAX)).unwrap();
+        let expected = run(&mut counted).unwrap();
+        let work = counted.used();
+        assert!(work > 1);
+        for limit in [0, work / 4, work / 2, work - 1, work, work + 1] {
+            let mut budget = WorkBudget::new(&Execution::default().max_work(limit)).unwrap();
+            let result = run(&mut budget);
+            if limit < work {
+                assert_eq!(result, Err(Error::WorkLimitExceeded { limit }));
+            } else {
+                assert_eq!(result.unwrap(), expected);
+            }
+            assert_eq!(
+                run(&mut WorkBudget::new(&Execution::default()).unwrap()).unwrap(),
+                expected
+            );
+        }
+        for at in [work / 4, work / 2] {
+            let flag = AtomicBool::new(false);
+            let execution = Execution::new(Some(u64::MAX), Some(&flag));
+            let mut budget = WorkBudget::new(&execution).unwrap();
+            budget.cancel_at_work(at);
+            assert_eq!(run(&mut budget), Err(Error::Cancelled));
+            assert!(budget.used() >= at);
+            assert!(flag.load(Ordering::Relaxed));
+            assert_eq!(
+                run(&mut WorkBudget::new(&Execution::default()).unwrap()).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn extraction_and_matching_share_the_operation_budget() {
+        let make = |offset| {
+            PersistenceDiagram::new(
+                0,
+                Coverage::Complete,
+                vec![
+                    crate::diagram::PersistenceInterval::new(
+                        0,
+                        offset,
+                        IntervalEnd::Finite(offset + 3.),
+                    )
+                    .unwrap(),
+                    crate::diagram::PersistenceInterval::new(
+                        0,
+                        offset + 1.,
+                        IntervalEnd::Finite(offset + 4.),
+                    )
+                    .unwrap(),
+                ],
+            )
+            .unwrap()
+        };
+        let a = make(0.);
+        let b = make(0.25);
+        for kind in [Kind::Bottleneck, Kind::W1, Kind::W2] {
+            let mut preparation =
+                WorkBudget::new(&Execution::default().max_work(u64::MAX)).unwrap();
+            let left = points(&a, 0, &mut preparation).unwrap();
+            let right = points(&b, 0, &mut preparation).unwrap();
+            let mut kernel = WorkBudget::new(&Execution::default().max_work(u64::MAX)).unwrap();
+            match kind {
+                Kind::Bottleneck => bottleneck::distance(&left.finite, &right.finite, &mut kernel),
+                Kind::W1 => wasserstein::distance(
+                    &left.finite,
+                    &right.finite,
+                    wasserstein::Metric::W1,
+                    &mut kernel,
+                ),
+                Kind::W2 => wasserstein::distance(
+                    &left.finite,
+                    &right.finite,
+                    wasserstein::Metric::W2,
+                    &mut kernel,
+                ),
+            }
+            .unwrap();
+            let mut whole = WorkBudget::new(&Execution::default().max_work(u64::MAX)).unwrap();
+            distance(&a, &b, 0, kind, &mut whole).unwrap();
+            assert_eq!(whole.used(), preparation.used() + kernel.used());
+            let limit = preparation.used().max(kernel.used());
+            let mut limited = WorkBudget::new(&Execution::default().max_work(limit)).unwrap();
+            assert_eq!(
+                distance(&a, &b, 0, kind, &mut limited),
+                Err(Error::WorkLimitExceeded { limit })
+            );
+        }
+    }
 }

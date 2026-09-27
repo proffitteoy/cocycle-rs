@@ -24,6 +24,7 @@
 //! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 //! SOFTWARE.
 
+use crate::execution::WorkBudget;
 use crate::{Error, Result};
 
 #[cfg(any(test, cocycle_distance_bench))]
@@ -103,17 +104,19 @@ fn push<T>(target: &mut Vec<T>, value: T) -> Result<()> {
     Ok(())
 }
 
-fn solve_graph(
+fn solve_graph<const CONTROLLED: bool>(
     graph: &Graph,
     dense: Option<bool>,
     greedy: bool,
     metric: Metric,
     _options: Options,
     _stats: &mut Stats,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
 ) -> Result<Vec<Option<usize>>> {
+    budget.check()?;
     if greedy
         && (graph.rows.max(graph.columns) <= 32 || graph.density() <= 0.05)
-        && let Some(matching) = certified_greedy(graph, _stats)?
+        && let Some(matching) = certified_greedy(graph, _stats, budget)?
     {
         return Ok(matching);
     }
@@ -123,6 +126,7 @@ fn solve_graph(
             graph,
             dense.is_none() && metric == Metric::W1 && graph.rows.max(graph.columns) >= 512,
             _stats,
+            budget,
         )
     } else {
         let flows = sparse::solve(
@@ -130,8 +134,10 @@ fn solve_graph(
             None,
             experiment!(_options.sparse, SparseLayout::Vectors),
             _stats,
+            budget,
         )?;
         let mut matching = buffer(graph.rows, None)?;
+        budget.step_by(flows.len())?;
         for (row, column, amount) in flows {
             if amount != 1 {
                 return Err(Error::InternalInvariant {
@@ -144,20 +150,27 @@ fn solve_graph(
     }
 }
 
-fn solve_components(
+fn solve_components<const CONTROLLED: bool>(
     graph: &Graph,
     metric: Metric,
     _options: Options,
     _stats: &mut Stats,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
 ) -> Result<Vec<Option<usize>>> {
     let mut matching = buffer(graph.rows, None)?;
     let mut column_map = buffer(graph.columns, 0)?;
-    for component in components(graph)? {
+    for component in components(graph, budget)? {
+        if CONTROLLED {
+            budget.step_by(sum_size(component.rows.len(), component.columns.len())?)?;
+        }
         record! { _stats.components += 1; }
         if component.rows.len() == 1 || component.columns.len() == 1 {
             let mut best = 0.0;
             let mut pair = None;
             for &row in &component.rows {
+                if CONTROLLED {
+                    budget.step_by(graph.row_work(row))?;
+                }
                 for edge in graph.edges(row) {
                     if edge.saving > best {
                         best = edge.saving;
@@ -176,6 +189,9 @@ fn solve_components(
         }
         let mut candidates = buffer(component.rows.len(), Vec::new())?;
         for (local, &row) in component.rows.iter().enumerate() {
+            if CONTROLLED {
+                budget.step_by(graph.row_work(row))?;
+            }
             for edge in graph.edges(row) {
                 push(
                     &mut candidates[local],
@@ -186,14 +202,22 @@ fn solve_components(
                 )?;
             }
         }
-        let local = Graph::from_candidates(candidates, component.columns.len(), true)?;
+        let local = Graph::from_candidates(candidates, component.columns.len(), true, budget)?;
         record! { local.record_capacity(_stats); }
         let local_matching = if sum_size(local.rows, local.columns)? <= 8 {
             record! { _stats.tiny_components += 1; }
-            tiny(&local)?
+            tiny(&local, budget)?
         } else {
             let dense = local.rows.max(local.columns) <= 24 || local.density() >= 0.20;
-            solve_graph(&local, Some(dense), !dense, metric, _options, _stats)?
+            solve_graph(
+                &local,
+                Some(dense),
+                !dense,
+                metric,
+                _options,
+                _stats,
+                budget,
+            )?
         };
         for (row, column) in local_matching.into_iter().enumerate() {
             if let Some(column) = column {
@@ -204,13 +228,19 @@ fn solve_components(
     Ok(matching)
 }
 
-pub(crate) fn distance(first: &[[f64; 2]], second: &[[f64; 2]], metric: Metric) -> Result<f64> {
+pub(crate) fn distance<const CONTROLLED: bool>(
+    first: &[[f64; 2]],
+    second: &[[f64; 2]],
+    metric: Metric,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
+) -> Result<f64> {
     solve(
         first,
         second,
         metric,
         Options::default(),
         &mut Stats::default(),
+        budget,
     )
 }
 
@@ -222,29 +252,38 @@ pub(crate) fn distance_with_options(
     _options: Options,
     _stats: &mut Stats,
 ) -> Result<f64> {
-    solve(first, second, metric, _options, _stats)
+    solve(
+        first,
+        second,
+        metric,
+        _options,
+        _stats,
+        &mut WorkBudget::unlimited(),
+    )
 }
 
-fn solve(
+fn solve<const CONTROLLED: bool>(
     first: &[[f64; 2]],
     second: &[[f64; 2]],
     metric: Metric,
     _options: Options,
     _stats: &mut Stats,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
 ) -> Result<f64> {
-    let scale = power_scale(first, second);
-    let first = prepare(first, scale)?;
-    let second = prepare(second, scale)?;
+    let scale = power_scale(first, second, budget)?;
+    let first = prepare(first, scale, budget)?;
+    let second = prepare(second, scale, budget)?;
     let original_pairs = product(first.len(), second.len())?;
     if !experiment!(_options.force_sparse, false) {
-        let (first_groups, rows) = groups(&first)?;
-        let (second_groups, columns) = groups(&second)?;
+        let (first_groups, rows) = groups(&first, budget)?;
+        let (second_groups, columns) = groups(&second, budget)?;
         record! { _stats.duplicate_groups = sum_size(first_groups.len(), second_groups.len())?; }
         let removed = first_groups.len() != first.len() || second_groups.len() != second.len();
         if removed && product(first_groups.len(), second_groups.len())? <= original_pairs / 16 {
             let mut candidates = buffer(first_groups.len(), Vec::new())?;
             let mut direct_cost_required = false;
             for (row, &point) in first_groups.iter().enumerate() {
+                budget.step_by(second_groups.len().max(1))?;
                 for (column, &other) in second_groups.iter().enumerate() {
                     record! { _stats.candidate_pairs += 1; }
                     let (value, direct) = saving(point, other, metric)?;
@@ -262,16 +301,20 @@ fn solve(
                 }
             }
             if direct_cost_required {
-                let matching = direct::matching(&first, &second, metric, _stats)?;
-                return restore_scale(from_matching(&first, &second, matching, metric)?, scale);
+                let matching = direct::matching(&first, &second, metric, _stats, budget)?;
+                return restore_scale(
+                    from_matching(&first, &second, matching, metric, budget)?,
+                    scale,
+                );
             }
-            let graph = Graph::from_candidates(candidates, second_groups.len(), true)?;
+            let graph = Graph::from_candidates(candidates, second_groups.len(), true, budget)?;
             record! { graph.record_capacity(_stats); }
             let flows = sparse::solve(
                 &graph,
                 Some((&rows, &columns)),
                 experiment!(_options.sparse, SparseLayout::Vectors),
                 _stats,
+                budget,
             )?;
             return restore_scale(
                 from_flows(
@@ -281,21 +324,25 @@ fn solve(
                     &columns,
                     &flows,
                     metric,
+                    budget,
                 )?,
                 scale,
             );
         }
     }
-    let graph = generate(&first, &second, metric, _stats)?;
+    let graph = generate(&first, &second, metric, _stats, budget)?;
     record! { graph.record_capacity(_stats); }
     let matching = if graph.direct_cost_required {
-        direct::matching(&first, &second, metric, _stats)?
+        direct::matching(&first, &second, metric, _stats, budget)?
     } else if experiment!(_options.force_sparse, false) {
-        solve_graph(&graph, Some(false), false, metric, _options, _stats)?
+        solve_graph(&graph, Some(false), false, metric, _options, _stats, budget)?
     } else if graph.density() >= 0.15 {
-        solve_graph(&graph, None, true, metric, _options, _stats)?
+        solve_graph(&graph, None, true, metric, _options, _stats, budget)?
     } else {
-        solve_components(&graph, metric, _options, _stats)?
+        solve_components(&graph, metric, _options, _stats, budget)?
     };
-    restore_scale(from_matching(&first, &second, matching, metric)?, scale)
+    restore_scale(
+        from_matching(&first, &second, matching, metric, budget)?,
+        scale,
+    )
 }

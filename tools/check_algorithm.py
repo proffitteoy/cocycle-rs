@@ -45,8 +45,8 @@ DOMAINS = {
                    "docs/guides/filtered-complexes.md"),
     },
     "diagram-distances": {
-        "sources": ("src/diagram_distances",),
-        "tests": ("diagram_distances",),
+        "sources": ("src/diagram_distances", "src/execution"),
+        "tests": ("diagram_distances", "execution"),
         "example": "diagram_distances",
         "guides": ("docs/development/diagram-analysis.md",),
         "unit_filter": "diagram_distances::",

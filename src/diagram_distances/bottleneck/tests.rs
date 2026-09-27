@@ -1,4 +1,93 @@
 use super::*;
+use crate::execution::Execution;
+
+fn unlimited() -> WorkBudget<'static> {
+    WorkBudget::new(&Execution::default()).unwrap()
+}
+
+#[test]
+fn execution_controls_cover_search_flow_refinement_and_duplicates() {
+    use crate::diagram_distances::tests::check_control;
+    let first: Vec<_> = (0..64)
+        .map(|i| [i as f64 / 64., i as f64 / 64. + 1.])
+        .collect();
+    let second: Vec<_> = first.iter().map(|p| [p[0] + 0.125, p[1] + 0.125]).collect();
+    for search in [Search::Quickselect, Search::Binary, Search::Refinement] {
+        let options = Options {
+            search,
+            ..Options::default()
+        };
+        check_control(|budget| {
+            solve(
+                &first,
+                &second,
+                options,
+                &mut Diagnostics::default(),
+                budget,
+            )
+        });
+    }
+    let duplicates = vec![[0., 2.]; 64];
+    let shifted = vec![[0.25, 2.25]; 64];
+    check_control(|budget| {
+        solve(
+            &duplicates,
+            &shifted,
+            Options::default(),
+            &mut Diagnostics::default(),
+            budget,
+        )
+    });
+    let mut sparse: Vec<_> = (0..128).map(|i| [i as f64, i as f64 + 0.03125]).collect();
+    sparse[127] = [127., 131.];
+    let shifted: Vec<_> = sparse
+        .iter()
+        .map(|p| [p[0] + 0.015625, p[1] + 0.015625])
+        .collect();
+    check_control(|budget| {
+        solve(
+            &sparse,
+            &shifted,
+            Options::default(),
+            &mut Diagnostics::default(),
+            budget,
+        )
+    });
+
+    // Bypass preparation to ensure checks are inside the matching algorithms.
+    let left = Prepared::new(&first, &mut unlimited()).unwrap();
+    let right = Prepared::new(&second, &mut unlimited()).unwrap();
+    let pair = Pair::new(&left, &right, true, &mut unlimited()).unwrap();
+    check_control(|budget| {
+        matching::Workspace::new(pair.size)?.within(
+            &pair,
+            0.125,
+            &mut Diagnostics::default(),
+            0,
+            budget,
+        )
+    });
+    for grouped in [false, true] {
+        check_control(|budget| {
+            flow::within(
+                &pair,
+                0.125,
+                grouped,
+                &mut Diagnostics::default(),
+                0,
+                budget,
+            )
+        });
+    }
+    check_control(|budget| {
+        geometry::distance(
+            &pair,
+            Options::default(),
+            &mut Diagnostics::default(),
+            budget,
+        )
+    });
+}
 
 // Independent enumeration of partial injective matches; no candidate search,
 // threshold graph, diagonal copies, flow, or production cost helper is shared.
@@ -156,12 +245,20 @@ fn mandatory_and_grouped_circulations_match_partial_enumeration() {
         ];
         let second = [catalog[(mask / 64) % 4], catalog[(mask / 16) % 4]];
         let expected = exhaustive(&first, &second);
-        let first = Prepared::new(&first).unwrap();
-        let second = Prepared::new(&second).unwrap();
-        let pair = Pair::new(&first, &second, false).unwrap();
+        let first = Prepared::new(&first, &mut unlimited()).unwrap();
+        let second = Prepared::new(&second, &mut unlimited()).unwrap();
+        let pair = Pair::new(&first, &second, false, &mut unlimited()).unwrap();
         for grouped in [false, true] {
             assert!(
-                flow::within(&pair, expected, grouped, &mut Diagnostics::default(), 0).unwrap()
+                flow::within(
+                    &pair,
+                    expected,
+                    grouped,
+                    &mut Diagnostics::default(),
+                    0,
+                    &mut unlimited()
+                )
+                .unwrap()
             );
             if expected > 0.0 {
                 assert!(
@@ -170,7 +267,8 @@ fn mandatory_and_grouped_circulations_match_partial_enumeration() {
                         expected.next_down(),
                         grouped,
                         &mut Diagnostics::default(),
-                        0
+                        0,
+                        &mut unlimited()
                     )
                     .unwrap()
                 );
@@ -183,12 +281,19 @@ fn mandatory_and_grouped_circulations_match_partial_enumeration() {
 fn extreme_finite_diagonal_cost_does_not_overflow() {
     let first = [[f64::MAX * 0.5, f64::MAX]];
     let expected = f64::MAX * 0.25;
-    assert_eq!(distance(&first, &[]).unwrap(), expected);
-    assert_eq!(distance(&[[f64::MIN, f64::MAX]], &[]).unwrap(), f64::MAX);
-    assert_eq!(distance(&first, &first).unwrap(), 0.0);
+    assert_eq!(distance(&first, &[], &mut unlimited()).unwrap(), expected);
+    assert_eq!(
+        distance(&[[f64::MIN, f64::MAX]], &[], &mut unlimited()).unwrap(),
+        f64::MAX
+    );
+    assert_eq!(distance(&first, &first, &mut unlimited()).unwrap(), 0.0);
     // Overflowing cross edges cannot contaminate the finite all-diagonal bound.
     let second = [[f64::MIN, f64::MIN * 0.5]];
-    assert!(distance(&first, &second).unwrap().is_finite());
+    assert!(
+        distance(&first, &second, &mut unlimited())
+            .unwrap()
+            .is_finite()
+    );
 }
 
 #[test]
@@ -214,13 +319,16 @@ fn diagonal_cost_is_half_lifetime_at_float_boundaries() {
     let next = 1.0_f64.next_up();
     let expected = (next - 1.0) * 0.5;
     for points in [[[1.0, next]], [[-next, -1.0]], [[0.0, next - 1.0]]] {
-        assert_eq!(distance(&points, &[]).unwrap(), expected);
-        assert_eq!(distance(&[], &points).unwrap(), expected);
+        assert_eq!(distance(&points, &[], &mut unlimited()).unwrap(), expected);
+        assert_eq!(distance(&[], &points, &mut unlimited()).unwrap(), expected);
     }
     let negative = [[-1.0, (-1.0_f64).next_up()]];
-    assert_eq!(distance(&negative, &[]).unwrap(), 2.0_f64.powi(-54));
+    assert_eq!(
+        distance(&negative, &[], &mut unlimited()).unwrap(),
+        2.0_f64.powi(-54)
+    );
     assert!(matches!(
-        distance(&[[0.0, f64::from_bits(1)]], &[]),
+        distance(&[[0.0, f64::from_bits(1)]], &[], &mut unlimited()),
         Err(Error::NumericalFailure { .. })
     ));
 }

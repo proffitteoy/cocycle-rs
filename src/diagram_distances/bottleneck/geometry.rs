@@ -3,6 +3,7 @@
 #[cfg(any(test, cocycle_distance_bench))]
 use super::bytes;
 use super::{Diagnostics, NONE, Options, Pair, Route, candidates, cross, filled, reserve};
+use crate::execution::WorkBudget;
 use crate::{Error, Result};
 
 #[derive(Clone, Copy)]
@@ -19,20 +20,32 @@ struct KdIndex {
 }
 
 impl KdIndex {
-    fn new(points: &[[f64; 2]]) -> Result<Self> {
+    fn new<const CONTROLLED: bool>(
+        points: &[[f64; 2]],
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<Self> {
+        budget.step_by(points.len())?;
         let mut indices = filled(points.len(), 0)?;
         for (index, value) in indices.iter_mut().enumerate() {
             *value = index;
         }
         let mut result = Self { nodes: Vec::new() };
         reserve(&mut result.nodes, points.len())?;
-        result.build(points, &mut indices, 0, NONE);
+        result.build(points, &mut indices, 0, NONE, budget)?;
         Ok(result)
     }
 
-    fn build(&mut self, points: &[[f64; 2]], indices: &mut [usize], depth: usize, parent: usize) {
+    fn build<const CONTROLLED: bool>(
+        &mut self,
+        points: &[[f64; 2]],
+        indices: &mut [usize],
+        depth: usize,
+        parent: usize,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<()> {
+        budget.step_by(indices.len())?;
         if indices.is_empty() {
-            return;
+            return Ok(());
         }
         let middle = indices.len() / 2;
         let axis = depth % 2;
@@ -51,8 +64,8 @@ impl KdIndex {
         // Median splits bound recursion by the bit width of usize, independently
         // of input geometry. Query/augment paths below are fully iterative.
         let (left, rest) = indices.split_at_mut(middle);
-        self.build(points, left, depth + 1, node);
-        self.build(points, &mut rest[1..], depth + 1, node);
+        self.build(points, left, depth + 1, node, budget)?;
+        self.build(points, &mut rest[1..], depth + 1, node, budget)?;
         let end = self.nodes.len();
         self.nodes[node].end = end;
         let mut child = node + 1;
@@ -65,9 +78,12 @@ impl KdIndex {
             }
             child = self.nodes[child].end;
         }
+        Ok(())
     }
 
-    fn next(
+    // Keep the existing query operands separate from diagnostics and execution.
+    #[allow(clippy::too_many_arguments)]
+    fn next<const CONTROLLED: bool>(
         &self,
         points: &[[f64; 2]],
         query: [f64; 2],
@@ -75,13 +91,15 @@ impl KdIndex {
         cursor: &mut usize,
         remaining: Option<&[usize]>,
         _stats: &mut Diagnostics,
-    ) -> Option<(usize, usize)> {
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<Option<(usize, usize)>> {
         let low = [
             (query[0] - radius).next_down(),
             (query[1] - radius).next_down(),
         ];
         let high = [(query[0] + radius).next_up(), (query[1] + radius).next_up()];
         while *cursor < self.nodes.len() {
+            budget.step()?;
             let index = *cursor;
             let node = self.nodes[index];
             if remaining.is_some_and(|counts| counts[index] == 0)
@@ -96,10 +114,10 @@ impl KdIndex {
             // Outward-rounded bounding boxes only discover candidates. This
             // scalar comparison is the exact threshold membership certificate.
             if cross(query, points[node.point]) <= radius {
-                return Some((node.point, index));
+                return Ok(Some((node.point, index)));
             }
         }
-        None
+        Ok(None)
     }
 }
 
@@ -131,10 +149,13 @@ struct Oracle<'a, 'p, 'q> {
 }
 
 impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
-    fn new(pair: &'q Pair<'a, 'p>) -> Result<Self> {
+    fn new<const CONTROLLED: bool>(
+        pair: &'q Pair<'a, 'p>,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<Self> {
         let mut result = Self {
             pair,
-            tree: KdIndex::new(pair.second.points)?,
+            tree: KdIndex::new(pair.second.points, budget)?,
             left: filled(pair.size, NONE)?,
             right: filled(pair.size, NONE)?,
             levels: Vec::new(),
@@ -146,11 +167,15 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
             radius: f64::INFINITY,
             used: false,
         };
-        result.allocate_scratch()?;
+        result.allocate_scratch(budget)?;
         Ok(result)
     }
 
-    fn allocate_scratch(&mut self) -> Result<()> {
+    fn allocate_scratch<const CONTROLLED: bool>(
+        &mut self,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<()> {
+        budget.step_by(self.pair.size)?;
         self.levels = filled(self.pair.size, NONE)?;
         self.active = filled(self.pair.second.points.len(), false)?;
         self.remaining = filled(self.tree.nodes.len(), 0)?;
@@ -163,13 +188,15 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
         Ok(())
     }
 
-    fn next_neighbor(
+    fn next_neighbor<const CONTROLLED: bool>(
         &self,
         left: usize,
         radius: f64,
         cursor: &mut Cursor,
         _stats: &mut Diagnostics,
-    ) -> Option<usize> {
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<Option<usize>> {
+        budget.step()?;
         let n = self.pair.first.points.len();
         let m = self.pair.second.points.len();
         if left < n {
@@ -180,34 +207,41 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
                 &mut cursor.node,
                 None,
                 _stats,
-            ) {
-                return Some(point);
+                budget,
+            )? {
+                return Ok(Some(point));
             }
             if cursor.diagonal == 0 {
                 cursor.diagonal = 1;
                 if self.pair.first.diagonals[left] <= radius {
-                    return Some(m + left);
+                    return Ok(Some(m + left));
                 }
             }
-            None
+            Ok(None)
         } else {
             if cursor.node == 0 {
                 cursor.node = 1;
                 if self.pair.second.diagonals[left - n] <= radius {
-                    return Some(left - n);
+                    return Ok(Some(left - n));
                 }
             }
             if cursor.diagonal < n {
                 let right = m + cursor.diagonal;
                 cursor.diagonal += 1;
-                Some(right)
+                Ok(Some(right))
             } else {
-                None
+                Ok(None)
             }
         }
     }
 
-    fn greedy(&mut self, radius: f64, _stats: &mut Diagnostics) {
+    fn greedy<const CONTROLLED: bool>(
+        &mut self,
+        radius: f64,
+        _stats: &mut Diagnostics,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<()> {
+        budget.step_by(self.pair.size)?;
         for (point, active) in self.active.iter_mut().enumerate() {
             *active = self.right[point] == NONE;
         }
@@ -222,6 +256,7 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
         let n = self.pair.first.points.len();
         let m = self.pair.second.points.len();
         for left in 0..n {
+            budget.step()?;
             if self.left[left] != NONE {
                 continue;
             }
@@ -234,12 +269,14 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
                 &mut cursor,
                 Some(&self.remaining),
                 _stats,
-            ) {
+                budget,
+            )? {
                 if !self.active[point] {
                     continue;
                 }
                 self.active[point] = false;
                 loop {
+                    budget.step()?;
                     self.remaining[node] -= 1;
                     node = self.tree.nodes[node].parent;
                     if node == NONE {
@@ -260,6 +297,7 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
                 self.right[found] = left;
             }
         }
+        budget.step_by(self.pair.size)?;
         self.free_diagonal.clear();
         for right in m..self.pair.size {
             if self.right[right] == NONE {
@@ -284,9 +322,16 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
                 self.right[right] = left;
             }
         }
+        Ok(())
     }
 
-    fn bfs(&mut self, radius: f64, _stats: &mut Diagnostics) -> bool {
+    fn bfs<const CONTROLLED: bool>(
+        &mut self,
+        radius: f64,
+        _stats: &mut Diagnostics,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<bool> {
+        budget.step_by(self.pair.size)?;
         self.queue.clear();
         self.levels.fill(NONE);
         for left in 0..self.pair.size {
@@ -298,10 +343,11 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
         let mut found = false;
         let mut head = 0;
         while head < self.queue.len() {
+            budget.step()?;
             let left = self.queue[head];
             head += 1;
             let mut cursor = Cursor::default();
-            while let Some(right) = self.next_neighbor(left, radius, &mut cursor, _stats) {
+            while let Some(right) = self.next_neighbor(left, radius, &mut cursor, _stats, budget)? {
                 let next = self.right[right];
                 if next == NONE {
                     found = true;
@@ -311,10 +357,16 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
                 }
             }
         }
-        found
+        Ok(found)
     }
 
-    fn augment(&mut self, left: usize, radius: f64, _stats: &mut Diagnostics) -> bool {
+    fn augment<const CONTROLLED: bool>(
+        &mut self,
+        left: usize,
+        radius: f64,
+        _stats: &mut Diagnostics,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<bool> {
         self.stack.clear();
         self.stack.push(Frame {
             left,
@@ -322,10 +374,11 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
             via: NONE,
         });
         while !self.stack.is_empty() {
+            budget.step()?;
             let last = self.stack.len() - 1;
             let left = self.stack[last].left;
             let mut cursor = self.stack[last].cursor;
-            let next = self.next_neighbor(left, radius, &mut cursor, _stats);
+            let next = self.next_neighbor(left, radius, &mut cursor, _stats, budget)?;
             self.stack[last].cursor = cursor;
             let Some(right) = next else {
                 self.levels[left] = NONE;
@@ -335,12 +388,13 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
             let previous = self.right[right];
             if previous == NONE {
                 let mut assign = right;
+                budget.step_by(self.stack.len())?;
                 for frame in self.stack.iter().rev() {
                     self.left[frame.left] = assign;
                     self.right[assign] = frame.left;
                     assign = frame.via;
                 }
-                return true;
+                return Ok(true);
             }
             if self.levels[left] != NONE && self.levels[previous] == self.levels[left] + 1 {
                 self.stack.push(Frame {
@@ -350,16 +404,23 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
                 });
             }
         }
-        false
+        Ok(false)
     }
 
-    fn within(&mut self, radius: f64, _options: Options, _stats: &mut Diagnostics) -> Result<bool> {
+    fn within<const CONTROLLED: bool>(
+        &mut self,
+        radius: f64,
+        _options: Options,
+        _stats: &mut Diagnostics,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<bool> {
+        budget.step_by(self.pair.size)?;
         record! { _stats.threshold_decisions += 1; }
         if radius < self.pair.lower() {
             return Ok(false);
         }
         if self.used && !experiment!(_options.reuse_scratch, true) {
-            self.allocate_scratch()?;
+            self.allocate_scratch(budget)?;
         } else if self.used {
             record! { _stats.scratch_reuses += 1; }
         }
@@ -369,6 +430,9 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
             self.right.fill(NONE);
         } else if self.used && radius < self.radius {
             for left in 0..self.pair.size {
+                if CONTROLLED && left % 256 == 0 {
+                    budget.step_by((self.pair.size - left).min(256))?;
+                }
                 let right = self.left[left];
                 if right != NONE && !self.pair.allowed(left, right, radius) {
                     self.left[left] = NONE;
@@ -383,14 +447,18 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
         }
         self.radius = radius;
         self.used = true;
-        self.greedy(radius, _stats);
+        self.greedy(radius, _stats, budget)?;
+        budget.step_by(self.pair.size)?;
         let mut size = self.left.iter().filter(|&&right| right != NONE).count();
-        while size < self.pair.size && self.bfs(radius, _stats) {
+        while size < self.pair.size && self.bfs(radius, _stats, budget)? {
             let before = size;
             for left in 0..self.pair.size {
+                if CONTROLLED && left % 256 == 0 {
+                    budget.step_by((self.pair.size - left).min(256))?;
+                }
                 if self.left[left] == NONE {
                     record! { _stats.augment_searches += 1; }
-                    size += usize::from(self.augment(left, radius, _stats));
+                    size += usize::from(self.augment(left, radius, _stats, budget)?);
                 }
             }
             if size == before {
@@ -415,20 +483,21 @@ impl<'a, 'p, 'q> Oracle<'a, 'p, 'q> {
     }
 }
 
-pub(super) fn distance(
+pub(super) fn distance<const CONTROLLED: bool>(
     pair: &Pair<'_, '_>,
     _options: Options,
     _stats: &mut Diagnostics,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
 ) -> Result<f64> {
-    let mut oracle = Oracle::new(pair)?;
+    let mut oracle = Oracle::new(pair, budget)?;
     let mut lower = pair.lower();
     let mut upper = pair.upper();
-    if oracle.within(lower, _options, _stats)? {
+    if oracle.within(lower, _options, _stats, budget)? {
         return Ok(lower);
     }
     if lower == 0.0 {
         let mut probe = upper * 0.5;
-        while probe > 0.0 && oracle.within(probe, _options, _stats)? {
+        while probe > 0.0 && oracle.within(probe, _options, _stats, budget)? {
             upper = probe;
             probe *= 0.5;
         }
@@ -439,7 +508,7 @@ pub(super) fn distance(
         if middle == lower || middle == upper {
             break;
         }
-        if oracle.within(middle, _options, _stats)? {
+        if oracle.within(middle, _options, _stats, budget)? {
             upper = middle;
         } else {
             lower = middle;
@@ -452,17 +521,20 @@ pub(super) fn distance(
         lower,
         upper,
         _stats,
+        budget,
     )?;
     if experiment!(_options.clip_candidates, true) {
         radii.retain(|&value| value > lower && value <= upper);
     }
+    budget.step_by(radii.len())?;
     radii.sort_unstable_by(f64::total_cmp);
     radii.dedup();
     let mut begin = 0;
     let mut end = radii.len();
     while begin < end {
+        budget.step()?;
         let middle = begin + (end - begin) / 2;
-        if oracle.within(radii[middle], _options, _stats)? {
+        if oracle.within(radii[middle], _options, _stats, budget)? {
             end = middle;
         } else {
             begin = middle + 1;
@@ -477,14 +549,24 @@ pub(super) fn distance(
         return Ok(result);
     }
     // A future range-index regression must never return an approximate bound.
-    radii = candidates(pair, Route::Refinement, false, 0.0, pair.upper(), _stats)?;
+    radii = candidates(
+        pair,
+        Route::Refinement,
+        false,
+        0.0,
+        pair.upper(),
+        _stats,
+        budget,
+    )?;
+    budget.step_by(radii.len())?;
     radii.sort_unstable_by(f64::total_cmp);
     radii.dedup();
     begin = 0;
     end = radii.len();
     while begin < end {
+        budget.step()?;
         let middle = begin + (end - begin) / 2;
-        if oracle.within(radii[middle], _options, _stats)? {
+        if oracle.within(radii[middle], _options, _stats, budget)? {
             end = middle;
         } else {
             begin = middle + 1;

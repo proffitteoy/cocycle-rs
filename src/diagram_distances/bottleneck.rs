@@ -31,6 +31,7 @@ mod geometry;
 #[path = "bottleneck/matching.rs"]
 mod matching;
 
+use crate::execution::WorkBudget;
 use crate::{Error, Result};
 
 #[cfg(any(test, cocycle_distance_bench))]
@@ -129,17 +130,25 @@ struct Prepared<'a> {
 }
 
 impl<'a> Prepared<'a> {
-    fn new(points: &'a [[f64; 2]]) -> Result<Self> {
+    fn new<const CONTROLLED: bool>(
+        points: &'a [[f64; 2]],
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<Self> {
+        budget.step_by(points.len())?;
         let mut diagonals = filled(points.len(), 0.0)?;
         let mut order = filled(points.len(), 0)?;
         let mut max_diagonal: f64 = 0.0;
         for (index, &point) in points.iter().enumerate() {
+            if CONTROLLED && index % 256 == 0 {
+                budget.step_by((points.len() - index).min(256))?;
+            }
             diagonals[index] = diagonal(point)?;
             max_diagonal = max_diagonal.max(diagonals[index]);
             order[index] = index;
         }
         // Equal-coordinate groups remain contiguous; the final index tie break
         // makes ordering deterministic without an allocating stable sort.
+        budget.step_by(order.len())?;
         order.sort_unstable_by(|&a, &b| {
             points[a][0]
                 .partial_cmp(&points[b][0])
@@ -151,7 +160,10 @@ impl<'a> Prepared<'a> {
         let mut multiplicities = Vec::new();
         reserve(&mut representatives, points.len())?;
         reserve(&mut multiplicities, points.len())?;
-        for &index in &order {
+        for (position, &index) in order.iter().enumerate() {
+            if CONTROLLED && position % 256 == 0 {
+                budget.step_by((order.len() - position).min(256))?;
+            }
             if representatives
                 .last()
                 .is_some_and(|&old| points[old] == points[index])
@@ -175,6 +187,7 @@ impl<'a> Prepared<'a> {
         })
     }
 
+    #[inline]
     fn window(&self, birth: f64, radius: f64) -> std::ops::Range<usize> {
         let lower = (birth - radius).next_down();
         let upper = (birth + radius).next_up();
@@ -204,7 +217,15 @@ struct Pair<'a, 'p> {
 }
 
 impl<'a, 'p> Pair<'a, 'p> {
-    fn new(first: &'p Prepared<'a>, second: &'p Prepared<'a>, dense: bool) -> Result<Self> {
+    // Keep dense preparation in the specialized caller.
+    #[inline(always)]
+    fn new<const CONTROLLED: bool>(
+        first: &'p Prepared<'a>,
+        second: &'p Prepared<'a>,
+        dense: bool,
+        budget: &mut WorkBudget<'_, CONTROLLED>,
+    ) -> Result<Self> {
+        budget.check()?;
         let size = first
             .points
             .len()
@@ -224,6 +245,7 @@ impl<'a, 'p> Pair<'a, 'p> {
                 .ok_or_else(size_overflow)?;
             reserve(&mut result.dense, count)?;
             for &a in first.points {
+                budget.step_by(second.points.len())?;
                 for &b in second.points {
                     result.dense.push(cross(a, b));
                 }
@@ -232,6 +254,8 @@ impl<'a, 'p> Pair<'a, 'p> {
         Ok(result)
     }
 
+    // Specialized matchers also need to inline this per-edge lookup.
+    #[inline(always)]
     fn cross(&self, left: usize, right: usize) -> f64 {
         if self.dense.is_empty() {
             cross(self.first.points[left], self.second.points[right])
@@ -326,12 +350,17 @@ fn prefer_mandatory(first: &Prepared<'_>, second: &Prepared<'_>, total: usize, u
     span > 0.0 && upper <= cutoff
 }
 
-pub(crate) fn distance(first: &[[f64; 2]], second: &[[f64; 2]]) -> Result<f64> {
+pub(crate) fn distance<const CONTROLLED: bool>(
+    first: &[[f64; 2]],
+    second: &[[f64; 2]],
+    budget: &mut WorkBudget<'_, CONTROLLED>,
+) -> Result<f64> {
     solve(
         first,
         second,
         Options::default(),
         &mut Diagnostics::default(),
+        budget,
     )
 }
 
@@ -342,18 +371,25 @@ pub(crate) fn distance_with_options(
     _options: Options,
     _stats: &mut Diagnostics,
 ) -> Result<f64> {
-    solve(first, second, _options, _stats)
+    solve(
+        first,
+        second,
+        _options,
+        _stats,
+        &mut WorkBudget::unlimited(),
+    )
 }
 
-fn solve(
+fn solve<const CONTROLLED: bool>(
     first: &[[f64; 2]],
     second: &[[f64; 2]],
     _options: Options,
     _stats: &mut Diagnostics,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
 ) -> Result<f64> {
     record! { *_stats = Diagnostics::default(); }
-    let first = Prepared::new(first)?;
-    let second = Prepared::new(second)?;
+    let first = Prepared::new(first, budget)?;
+    let second = Prepared::new(second, budget)?;
     let total = first
         .points
         .len()
@@ -363,6 +399,7 @@ fn solve(
     if first.points.is_empty() || second.points.is_empty() {
         return Ok(first.max_diagonal.max(second.max_diagonal));
     }
+    budget.step_by(total)?;
     let duplicates = prefer_multiplicity(&first, &second, total);
     if duplicates && identical(&first, &second) {
         record! { _stats.route = Route::Identity; }
@@ -380,7 +417,10 @@ fn solve(
             route = Route::Multiplicity;
         } else if total >= 128 {
             let mut window_pairs = 0_usize;
-            for &index in &first.order {
+            for (position, &index) in first.order.iter().enumerate() {
+                if CONTROLLED && position % 256 == 0 {
+                    budget.step_by((first.order.len() - position).min(256))?;
+                }
                 window_pairs = window_pairs
                     .checked_add(second.window(first.points[index][0], upper).len())
                     .ok_or_else(size_overflow)?;
@@ -389,6 +429,7 @@ fn solve(
                 record! { _stats.route = Route::NoCross; }
                 return Ok(upper);
             }
+            budget.step_by(total)?;
             if prefer_mandatory(first, second, total, upper) {
                 route = Route::MandatorySparse;
             } else if first.points.len().min(second.points.len()) >= 32
@@ -402,9 +443,9 @@ fn solve(
         route = Route::Refinement;
     }
     record! { _stats.route = route; }
-    let pair = Pair::new(first, second, route == Route::Quickselect)?;
+    let pair = Pair::new(first, second, route == Route::Quickselect, budget)?;
     if route == Route::Refinement {
-        return geometry::distance(&pair, _options, _stats);
+        return geometry::distance(&pair, _options, _stats, budget);
     }
     let mut radii = candidates(
         &pair,
@@ -413,6 +454,7 @@ fn solve(
         0.0,
         pair.upper(),
         _stats,
+        budget,
     )?;
     let extra_bytes = experiment!(pair.bytes().saturating_add(bytes(&radii)), 0);
     record! { _stats.workspace(extra_bytes); }
@@ -421,16 +463,20 @@ fn solve(
     } else {
         None
     };
-    let mut decide = |radius| -> Result<bool> {
+    let mut decide = |radius, budget: &mut WorkBudget<'_, CONTROLLED>| -> Result<bool> {
+        budget.step()?;
         record! { _stats.threshold_decisions += 1; }
         if radius < pair.lower() {
             return Ok(false);
         }
         match route {
-            Route::Multiplicity => flow::within(&pair, radius, true, _stats, extra_bytes),
-            Route::MandatorySparse => flow::within(&pair, radius, false, _stats, extra_bytes),
+            Route::Multiplicity => flow::within(&pair, radius, true, _stats, extra_bytes, budget),
+            Route::MandatorySparse => {
+                flow::within(&pair, radius, false, _stats, extra_bytes, budget)
+            }
             _ => {
                 if pair.size >= 384 {
+                    budget.step_by(pair.size)?;
                     let optional_first = pair
                         .first
                         .diagonals
@@ -472,7 +518,7 @@ fn solve(
                             ),
                             0
                         );
-                        return flow::within(&pair, radius, false, _stats, allocated);
+                        return flow::within(&pair, radius, false, _stats, allocated, budget);
                     }
                 }
                 if !experiment!(_options.reuse_scratch, true) {
@@ -483,19 +529,20 @@ fn solve(
                     .ok_or(Error::InternalInvariant {
                         reason: "quickselect matcher workspace is missing",
                     })?
-                    .within(&pair, radius, _stats, extra_bytes)
+                    .within(&pair, radius, _stats, extra_bytes, budget)
             }
         }
     };
     #[cfg(any(test, cocycle_distance_bench))]
     if _options.search == Search::Binary {
+        budget.step_by(radii.len())?;
         radii.sort_unstable_by(f64::total_cmp);
         radii.dedup();
         let mut lower = radii.partition_point(|&value| value < pair.lower());
         let mut end = radii.len();
         while lower < end {
             let middle = lower + (end - lower) / 2;
-            if decide(radii[middle])? {
+            if decide(radii[middle], budget)? {
                 end = middle;
             } else {
                 lower = middle + 1;
@@ -505,14 +552,17 @@ fn solve(
             reason: "bottleneck has no feasible diagonal bound",
         });
     }
+    budget.step_by(radii.len())?;
     radii.retain(|&value| value >= pair.lower());
     let mut remaining = radii.as_mut_slice();
     let mut best = pair.upper();
     while !remaining.is_empty() {
+        budget.step_by(remaining.len())?;
         let middle = remaining.len() / 2;
         let (_, pivot, _) = remaining.select_nth_unstable_by(middle, f64::total_cmp);
         let pivot = *pivot;
-        if pivot >= best || decide(pivot)? {
+        budget.step_by(remaining.len())?;
+        if pivot >= best || decide(pivot, budget)? {
             best = best.min(pivot);
             let mut count = 0;
             for index in 0..remaining.len() {
@@ -536,13 +586,14 @@ fn solve(
     Ok(best)
 }
 
-fn candidates(
+fn candidates<const CONTROLLED: bool>(
     pair: &Pair<'_, '_>,
     route: Route,
     clip: bool,
     lower: f64,
     upper: f64,
     _stats: &mut Diagnostics,
+    budget: &mut WorkBudget<'_, CONTROLLED>,
 ) -> Result<Vec<f64>> {
     let grouped = route == Route::Multiplicity;
     let first_indices = if grouped {
@@ -558,6 +609,7 @@ fn candidates(
     let mut values = Vec::new();
     push(&mut values, 0.0)?;
     for (prepared, indices) in [(pair.first, first_indices), (pair.second, second_indices)] {
+        budget.step_by(indices.len())?;
         for &index in indices {
             let value = prepared.diagonals[index];
             if !clip || (value >= lower && value <= upper) {
@@ -567,7 +619,9 @@ fn candidates(
     }
     for &left in first_indices {
         if clip && matches!(route, Route::MandatorySparse | Route::Refinement) {
-            for position in pair.second.window(pair.first.points[left][0], upper) {
+            let window = pair.second.window(pair.first.points[left][0], upper);
+            budget.step_by(window.len().max(1))?;
+            for position in window {
                 let right = pair.second.order[position];
                 record! { _stats.adjacency_checks += 1; }
                 let value = pair.cross(left, right);
@@ -576,6 +630,7 @@ fn candidates(
                 }
             }
         } else {
+            budget.step_by(second_indices.len().max(1))?;
             for &right in second_indices {
                 let value = pair.cross(left, right);
                 if !clip || (value >= lower && value <= upper) {
